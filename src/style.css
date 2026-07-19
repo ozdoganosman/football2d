@@ -1,0 +1,279 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #24501e;
+  color: #eef3ea;
+  font-family: Verdana, Tahoma, sans-serif;
+  font-size: 13px;
+}
+
+#app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* FM 2006 skorboardu */
+#scoreboard {
+  display: flex;
+  align-items: stretch;
+  background: #35682c;
+  border: 2px solid #1d3d18;
+  border-radius: 4px;
+  overflow: hidden;
+  height: 44px;
+}
+
+.plate {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-weight: bold;
+  font-size: 17px;
+  padding: 0 16px;
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.plate.home {
+  justify-content: flex-start;
+  background: linear-gradient(#d43a42, #a01820);
+}
+
+.plate.away {
+  justify-content: flex-end;
+  background: linear-gradient(#3a6ed4, #1840a0);
+}
+
+.led {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #101410;
+  min-width: 130px;
+  padding: 2px 14px;
+  font-family: 'Courier New', monospace;
+  border-left: 2px solid #1d3d18;
+  border-right: 2px solid #1d3d18;
+}
+
+.led #score {
+  color: #d6f43a;
+  font-size: 19px;
+  font-weight: bold;
+  letter-spacing: 2px;
+}
+
+.led #clock {
+  color: #7fdc50;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+#stage {
+  display: flex;
+  gap: 8px;
+}
+
+#pitchWrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#pitch {
+  width: 100%;
+  aspect-ratio: 117 / 86;
+  display: block;
+  background: #2e6325;
+  border: 2px solid #1d3d18;
+  border-radius: 4px 4px 0 0;
+}
+
+/* Yorum bandı */
+#ticker {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e9ede6;
+  color: #1840a0;
+  font-weight: bold;
+  font-size: 14px;
+  border: 2px solid #1d3d18;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  transition: background 0.15s, color 0.15s;
+  text-align: center;
+  padding: 0 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#ticker.home {
+  background: #b02028;
+  color: #fff;
+}
+
+#ticker.away {
+  background: #1c56b0;
+  color: #fff;
+}
+
+#ticker.neutral {
+  background: #26301f;
+  color: #d6f43a;
+}
+
+#ticker.goal {
+  background: #fff;
+  color: #b02028;
+  font-size: 16px;
+}
+
+#side {
+  width: 250px;
+  background: #2c5824;
+  border: 2px solid #1d3d18;
+  border-radius: 4px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#side h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #cfe6b8;
+  border-bottom: 1px solid #477239;
+  padding-bottom: 4px;
+}
+
+#stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+#stats td {
+  padding: 3px 2px;
+}
+
+#stats td.l {
+  text-align: left;
+  width: 20%;
+  font-weight: bold;
+}
+
+#stats td.c {
+  text-align: center;
+  color: #cfe6b8;
+}
+
+#stats td.r {
+  text-align: right;
+  width: 20%;
+  font-weight: bold;
+}
+
+#feed {
+  list-style: none;
+  overflow-y: auto;
+  max-height: 300px;
+  font-size: 12px;
+}
+
+#feed li {
+  padding: 3px 2px;
+  border-bottom: 1px dotted #3d6631;
+}
+
+#feed li.goal {
+  color: #ffe45c;
+  font-weight: bold;
+}
+
+#feed li.red {
+  color: #ff7a7a;
+  font-weight: bold;
+}
+
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #2c5824;
+  border: 2px solid #1d3d18;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.btn {
+  background: linear-gradient(#4a7f3c, #35682c);
+  color: #fff;
+  border: 1px solid #1d3d18;
+  border-radius: 3px;
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.btn:hover {
+  filter: brightness(1.15);
+}
+
+.btn.primary {
+  background: linear-gradient(#d4a63a, #b08018);
+}
+
+.btn.speed.active {
+  background: linear-gradient(#d6f43a, #9fc020);
+  color: #1d3d18;
+}
+
+.sel {
+  background: #35682c;
+  color: #fff;
+  border: 1px solid #1d3d18;
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.muted {
+  color: #9cbd8a;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+@media (max-width: 900px) {
+  #stage {
+    flex-direction: column;
+  }
+
+  #side {
+    width: 100%;
+  }
+}

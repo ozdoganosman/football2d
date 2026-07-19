@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>football2d — FM Tarzı 2D Maç Simülatörü</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="scoreboard">
+        <div id="homePlate" class="plate home">EV SAHİBİ</div>
+        <div class="led">
+          <span id="score">0 - 0</span>
+          <span id="clock">00:00</span>
+        </div>
+        <div id="awayPlate" class="plate away">DEPLASMAN</div>
+      </header>
+
+      <div id="stage">
+        <div id="pitchWrap">
+          <canvas id="pitch"></canvas>
+          <div id="ticker"><span id="tickerText">Maça hoş geldiniz</span></div>
+        </div>
+        <aside id="side">
+          <h3>Maç İstatistikleri</h3>
+          <table id="stats"></table>
+          <h3>Önemli Olaylar</h3>
+          <ul id="feed"></ul>
+        </aside>
+      </div>
+
+      <div id="controls">
+        <button id="btnNew" class="btn primary">Yeni Maç</button>
+        <button id="btnPlay" class="btn">Başlat</button>
+        <span class="group" id="speedGroup">
+          <button class="btn speed active" data-speed="1">1x</button>
+          <button class="btn speed" data-speed="2">2x</button>
+          <button class="btn speed" data-speed="4">4x</button>
+          <button class="btn speed" data-speed="8">8x</button>
+        </span>
+        <select id="modeSel" class="sel">
+          <option value="highlights">Önemli Anlar</option>
+          <option value="full">Tüm Maç</option>
+        </select>
+        <span class="group">
+          <label>Ev:</label>
+          <select id="homeFormation" class="sel"></select>
+          <label>Dep:</label>
+          <select id="awayFormation" class="sel"></select>
+        </span>
+        <span id="seedInfo" class="muted"></span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

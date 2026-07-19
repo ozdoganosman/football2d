@@ -1,0 +1,106 @@
+import { F_CLOCK, F_POSS_AWAY, F_POSS_HOME, FRAME_STRIDE } from './engine/constants'
+import { simulateMatch } from './engine/engine'
+import { FORMATION_IDS } from './engine/formations'
+import type { FormationId, MatchResult, TeamInfo } from './engine/types'
+import { KIZILKAYA, MAVIDERE } from './data/teams'
+import { Renderer } from './render/renderer'
+import { Hud } from './ui/hud'
+import { Playback, type PlaybackMode } from './ui/playback'
+
+const canvas = document.getElementById('pitch') as HTMLCanvasElement
+const btnNew = document.getElementById('btnNew') as HTMLButtonElement
+const btnPlay = document.getElementById('btnPlay') as HTMLButtonElement
+const modeSel = document.getElementById('modeSel') as HTMLSelectElement
+const homeFormation = document.getElementById('homeFormation') as HTMLSelectElement
+const awayFormation = document.getElementById('awayFormation') as HTMLSelectElement
+const seedInfo = document.getElementById('seedInfo') as HTMLElement
+const speedButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.btn.speed'))
+
+for (const sel of [homeFormation, awayFormation]) {
+  for (const f of FORMATION_IDS) {
+    const opt = document.createElement('option')
+    opt.value = f
+    opt.textContent = f
+    sel.appendChild(opt)
+  }
+}
+homeFormation.value = KIZILKAYA.formation
+awayFormation.value = MAVIDERE.formation
+
+let result: MatchResult
+let renderer: Renderer | null = null
+let playback: Playback
+let hud: Hud | null = null
+
+function newMatch(): void {
+  const home: TeamInfo = { ...KIZILKAYA, formation: homeFormation.value as FormationId }
+  const away: TeamInfo = { ...MAVIDERE, formation: awayFormation.value as FormationId }
+  // Seed motor dışında üretilir; motor içinde tek rastgelelik kaynağı seeded RNG'dir
+  const seed = (Math.random() * 0x7fffffff) | 0
+
+  result = simulateMatch(home, away, seed)
+  seedInfo.textContent = `seed: ${seed} · skor: ${result.stats.goals[0]}-${result.stats.goals[1]}`
+
+  if (!renderer) renderer = new Renderer(canvas, result)
+  else renderer.setResult(result)
+
+  if (!hud) hud = new Hud(result.teams)
+  else hud.reset(result.teams)
+
+  playback = new Playback(result, modeSel.value as PlaybackMode, {
+    onEvent: (e, visible) => hud?.applyEvent(e, visible),
+    onFinish: () => {
+      btnPlay.textContent = 'Bitti'
+      btnPlay.disabled = true
+    },
+  })
+  playback.playing = true
+  playback.speedMult = currentSpeed()
+  btnPlay.textContent = 'Duraklat'
+  btnPlay.disabled = false
+}
+
+function currentSpeed(): number {
+  const active = speedButtons.find((b) => b.classList.contains('active'))
+  return active ? Number(active.dataset.speed) : 1
+}
+
+btnNew.addEventListener('click', newMatch)
+
+btnPlay.addEventListener('click', () => {
+  if (playback.finished) return
+  playback.playing = !playback.playing
+  btnPlay.textContent = playback.playing ? 'Duraklat' : 'Devam'
+})
+
+for (const b of speedButtons) {
+  b.addEventListener('click', () => {
+    speedButtons.forEach((x) => x.classList.remove('active'))
+    b.classList.add('active')
+    playback.speedMult = Number(b.dataset.speed)
+  })
+}
+
+modeSel.addEventListener('change', () => {
+  playback.setMode(modeSel.value as PlaybackMode)
+})
+
+window.addEventListener('resize', () => renderer?.resize())
+
+let lastT = performance.now()
+function loop(now: number): void {
+  const dt = Math.min(0.1, (now - lastT) / 1000)
+  lastT = now
+  if (playback && renderer && hud) {
+    playback.advance(dt)
+    renderer.draw(playback.playhead)
+    const f = Math.floor(playback.playhead) * FRAME_STRIDE
+    hud.updateClock(result.frames[f + F_CLOCK])
+    hud.updatePossession(result.frames[f + F_POSS_HOME], result.frames[f + F_POSS_AWAY])
+    hud.renderStats()
+  }
+  requestAnimationFrame(loop)
+}
+
+newMatch()
+requestAnimationFrame(loop)

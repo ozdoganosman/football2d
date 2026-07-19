@@ -1,0 +1,71 @@
+# football2d — FM 2006 Tarzı 2D Maç Simülatörü
+
+Football Manager 2006'nın klasik 2D maç ekranını örnek alan, tarayıcıda çalışan
+bir maç motoru + izleme arayüzü. Maç önce deterministik motorda simüle edilir,
+sonra FM tarzı oynatılır: çizgili yeşil saha, numaralı daireler, isim etiketleri,
+yorum bandı, skorboard ve **Önemli Anlar** modu.
+
+## Çalıştırma
+
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run test     # vitest (motor + denge testleri)
+npm run build    # tip kontrolü + üretim derlemesi
+```
+
+## Headless denge aracı
+
+Motor DOM'suz çalışır; yüzlerce maçı komut satırından simüle edip denge
+raporu alabilirsiniz:
+
+```bash
+npm run sim -- --matches 200 --seed 1
+```
+
+Rapor: galibiyet dağılımı, gol ortalaması, şut/korner/faul/kart/pas
+istatistikleri ve toplam gol dağılım histogramı.
+
+## Mimari
+
+Üç bağımsız katman:
+
+1. **Simülasyon çekirdeği** (`src/engine/`) — sabit tick (10 tick/sn), seeded
+   RNG (mulberry32; motor içinde `Math.random` yasak). Aynı seed → birebir aynı
+   maç. Çıktı: kare dizisi (`Float32Array`) + olay listesi + istatistikler.
+2. **Karar katmanı** — Utility AI: topu taşıyan oyuncu her seçeneğe puan verir
+   (pas hattı açıklığı, alıcının alanı, pozisyon değeri, şut kalitesi, öndeki
+   boşluk) ve en yüksek puanı seçer (`src/engine/decisions.ts`).
+3. **Sunum** (`src/render/`, `src/ui/`) — Canvas 2D çizim, kayıttan oynatma
+   (hız 1x-8x, duraklat), Türkçe yorum şablonları, istatistik paneli.
+
+Kritik mekanikler:
+
+- **Top sahipliği state machine**: top ya boşta (`loose`), ya bir oyuncuda
+  (`possessed`), ya havada (`inFlight`). Boştaki topa takım başına yalnız en
+  yakın 1-2 oyuncu gider; pas hedefi topun varış noktasına koşar, savunmadan da
+  en yakın 2 oyuncu varış noktasına kapanır.
+- **Pozisyon sistemi**: formasyondan gelen ev pozisyonu + topa göre blok
+  kayması. Topsuz takım için çift yönlü kompaktlık: hatlar topun gerisine
+  sınırsız çökmez, topun önünde de asılı kalmaz (`src/engine/positioning.ts`).
+- **Restartlar**: santra, taç, korner (ceza sahasına ortayla), kale vuruşu,
+  serbest vuruş, penaltı; faul → kart zarları (sarı/çift sarı/kırmızı).
+- **Önemli anlar**: olay listesinden şut/gol/kart/korner çevresi pencereler
+  çıkarılır (`src/engine/highlights.ts`); oynatıcı yalnız bu pencereleri
+  izletir, saat aralarda atlar.
+
+## Bilinçli sadeleştirmeler (v1)
+
+- Ofsayt yok; oyuncu değişikliği yok (kulübeler kozmetik); uzatma/penaltı
+  serisi yok; kendi kalesine gol yok.
+- Taktik ayarları (mentalite/tempo/pres) henüz yok — formasyon seçilebilir.
+- Yorumlar şablon tabanlı Türkçe metinlerdir.
+
+## Denge notları
+
+Nitelikler (1-20; hız, pas, şut, top sürme, müdahale, pozisyon alma,
+kalecilik, dayanıklılık) motor katsayılarına `src/engine/attributes.ts`
+üzerinden bağlanır; denge ayarı bu dosya + `decisions.ts` puan ağırlıkları +
+`duels.ts`/`shooting.ts` olasılıklarından yapılır. Mevcut ayarla ~30 maçlık
+taramada: maç başına ~2-4 gol, takım başına ~10-20 şut, ~25 faul, ~2 sarı kart;
+güçlü kadro maçların çoğunluğunu kazanır.
