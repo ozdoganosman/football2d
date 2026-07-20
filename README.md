@@ -54,10 +54,25 @@ Kritik mekanikler:
   çıkarılır (`src/engine/highlights.ts`); oynatıcı yalnız bu pencereleri
   izletir, saat aralarda atlar.
 
+## Oyun sistemleri
+
+- **Ofsayt**: çizgi sondan ikinci savunmacıdan hesaplanır; hücumcular çizgiye
+  saygılı pozisyon alır, sınırdaki paslar bayrağa takılır (taç/santra/kale
+  vuruşu muaf).
+- **Görev tabanlı savunma**: topa takım başına tek görevli (first defender),
+  bir cover, alıcının markajcısı adamıyla iniş noktasına gider; kalanlar
+  adam adama markaj/şekil tutar. Son adam kuralı: hat en derin koşucuyu izler.
+  Baskı hattı tavanı: full saha pres yok; forvetler prese isteksizdir.
+- **Havadan top**: uzun paslar, ortalar ve degajlar parabolik uçar (gölge +
+  yükseklik görseli); havadaki top kesilemez, bloğun üstünden aşırtma işler.
+- **Doku**: baskı altında pas hatası büyür, pas hızları değişkendir, top
+  sürme kararlı ve görünürdür, baskı altındaki taşıyıcıya takım arkadaşları
+  pas açısı yaratır, oyuncular enerjilerini idareli kullanır.
+
 ## Bilinçli sadeleştirmeler (v1)
 
-- Ofsayt yok; oyuncu değişikliği yok (kulübeler kozmetik); uzatma/penaltı
-  serisi yok; kendi kalesine gol yok.
+- Oyuncu değişikliği yok (kulübeler kozmetik); uzatma/penaltı serisi yok;
+  kendi kalesine gol yok.
 - Taktik ayarları (mentalite/tempo/pres) henüz yok — formasyon seçilebilir.
 - Yorumlar şablon tabanlı Türkçe metinlerdir.
 

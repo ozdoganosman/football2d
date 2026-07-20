@@ -1,4 +1,5 @@
 import {
+  F_BALL_H,
   F_BALL_X,
   F_BALL_Y,
   F_CLOCK,
@@ -370,8 +371,13 @@ class MatchSim {
     const from = { ...this.ballPos() }
     const lead = scale(norm(sub(to.pos, from)), 1.2)
     const d0 = dist(from, to.pos)
-    // Uzun paslarda hata payı büyür
-    const err = passErrorRate(by.info.attributes) * (1 + d0 / 45)
+    // Uzun paslarda ve baskı altında hata payı büyür
+    let err = passErrorRate(by.info.attributes) * (1 + d0 / 40)
+    let passerPressure = 99
+    for (const o of this.active(1 - by.teamIdx)) {
+      passerPressure = Math.min(passerPressure, dist(o.pos, by.pos))
+    }
+    if (passerPressure < 5) err *= 1 + (1 - passerPressure / 5) * 0.7
     const target = {
       x: to.pos.x + lead.x + this.rng.range(-1, 1) * err * d0,
       y: to.pos.y + lead.y + this.rng.range(-1, 1) * err * d0,
@@ -386,16 +392,20 @@ class MatchSim {
     }
 
     const d = Math.max(1, dist(from, target))
+    // Uzun paslar ve ortalar havadan gider (bloğun üstünden aşar)
+    const lofted = flight === 'cross' || d0 > 24
     this.ball = {
       kind: 'inFlight',
       from,
       to: target,
       t: 0,
-      duration: d / passSpeed(by.info.attributes),
+      // Pas hızı sabit değil: her pasta doğal değişkenlik var
+      duration: d / (passSpeed(by.info.attributes) * this.rng.range(0.85, 1.1)),
       flight,
       byId,
       targetId,
       offside,
+      hMax: lofted ? Math.min(7, 2 + d * 0.08) : 0,
     }
     this.lastTouchTeam = by.teamIdx
     this.lastTouchId = byId
@@ -470,6 +480,7 @@ class MatchSim {
       flight: 'clearance',
       byId,
       targetId: null,
+      hMax: 3 + d * 0.07, // degaj daima havadan
     }
     this.lastTouchTeam = by.teamIdx
     this.lastTouchId = byId
@@ -516,6 +527,7 @@ class MatchSim {
         flight: 'cross',
         byId: takerId,
         targetId,
+        hMax: 4 + d * 0.06, // korner ortası havadan
       }
       this.passesAttempted[forTeam]++
       return
@@ -930,12 +942,14 @@ class MatchSim {
         this.launchClearance(carrier.id)
         return
       }
-      // dribble: yön belirle, hafif gürültü
+      // dribble: yön belirle, hafif gürültü; sürüşe kararlı bağlan —
+      // oyuncu topu gerçekten taşısın, yarım adımda vazgeçmesin
       const noisy = norm({
         x: decision.dir.x + this.rng.range(-0.25, 0.25),
         y: decision.dir.y + this.rng.range(-0.35, 0.35),
       })
       carrier.dribbleDir = noisy
+      this.nextDecisionTick = this.tick + 11
     }
   }
 
@@ -986,10 +1000,12 @@ class MatchSim {
       return
     }
 
-    // Uçuş ortası araya girme (paslar/ortalar) — yolun ilk çeyreği hariç.
-    // Bloğun içinden geçen uzun paslar bu yüzden risklidir. Ofsayt çalınacak
-    // pasa savunma dokunmaz.
-    if (!b.offside && b.t > 0.25 && b.t < 0.95) {
+    // Topun anlık yüksekliği (parabolik): havadaki topa ayak uzanmaz
+    const height = 4 * (b.hMax ?? 0) * b.t * (1 - b.t)
+
+    // Uçuş ortası araya girme (paslar/ortalar) — yolun ilk çeyreği hariç ve
+    // yalnız top erişilebilir yükseklikteyken. Ofsayt pasına savunma dokunmaz.
+    if (!b.offside && b.t > 0.25 && b.t < 0.95 && height < 2) {
       const passingTeam = this.players[b.byId].teamIdx
       for (const o of this.active(1 - passingTeam)) {
         if (dist(o.pos, pos) < 0.8 && this.rng.chance(0.08 * interceptSkill(o.info.attributes))) {
@@ -998,14 +1014,14 @@ class MatchSim {
           return
         }
       }
-      // Kaleci ortayı toplayabilir
-      if (b.flight === 'cross') {
-        const gk = this.keeperOf(1 - passingTeam)
-        if (gk && dist(gk.pos, pos) < 2.2 && this.rng.chance(0.4)) {
-          this.possess(gk.id)
-          this.pushEvent('interception', gk.teamIdx, gk.id)
-          return
-        }
+    }
+    // Kaleci ortayı havada toplayabilir
+    if (!b.offside && b.flight === 'cross' && b.t > 0.5 && height < 3) {
+      const gk = this.keeperOf(1 - this.players[b.byId].teamIdx)
+      if (gk && dist(gk.pos, pos) < 2.2 && this.rng.chance(0.4)) {
+        this.possess(gk.id)
+        this.pushEvent('interception', gk.teamIdx, gk.id)
+        return
       }
     }
 
@@ -1064,7 +1080,8 @@ class MatchSim {
       if (p.info.role === 'GK' && !allowGk) continue
       const d = dist(p.pos, focus)
       if (d > maxRange) continue
-      const depthPref = p.info.role === 'DF' ? -22 : p.info.role === 'MF' ? -2 : 18
+      // Santraforlar baskıya isteksizdir: yalnız çok yüksek toplara giderler
+      const depthPref = p.info.role === 'DF' ? -22 : p.info.role === 'MF' ? -2 : 26
       let cost = d + Math.abs(focusAtt.x - depthPref) * 0.22
       if (p.id === this.engagerId[teamIdx]) cost *= 0.72
       if (cost < bestCost) {
@@ -1125,8 +1142,10 @@ class MatchSim {
             d > 2.5 ? add(carrier.pos, this.fromAttack({ x: -1.5, y: 0 }, defTeam)) : carrier.pos
           overrides.set(engager, { target: t, sprint: true })
         } else {
-          // top ile kendi kalesi arasında ~3 m önünde pozisyon alıp bekler
-          const stand = add(carrier.pos, this.fromAttack({ x: -3.2, y: 0 }, defTeam))
+          // top ile kendi kalesi arasında pozisyon alıp bekler; forvetse
+          // daha da mesafeli durur (isteksiz baskı)
+          const standDist = e.info.role === 'FW' ? -4.5 : -3.2
+          const stand = add(carrier.pos, this.fromAttack({ x: standDist, y: 0 }, defTeam))
           overrides.set(engager, { target: stand, sprint: d > 7 })
         }
         // Kutu acil durumu: top kendi ceza sahasındaysa ikinci adam da topa
@@ -1152,6 +1171,33 @@ class MatchSim {
               target: add(carrier.pos, this.fromAttack({ x: -6, y: 0 }, defTeam)),
               sprint: false,
             })
+          }
+        }
+      }
+
+      // Pas açısı desteği: taşıyıcı baskı altındaysa en yakın iki takım
+      // arkadaşı kısa pas seçeneği yaratacak açılara iner (boşa çıkma)
+      let nearestDef = 99
+      for (const q of this.active(defTeam)) {
+        nearestDef = Math.min(nearestDef, dist(q.pos, carrier.pos))
+      }
+      if (nearestDef < 4) {
+        const goalDir = norm(
+          sub(vec(HALF_LENGTH * this.attackDir[carrier.teamIdx], 0), carrier.pos),
+        )
+        const perp = vec(-goalDir.y, goalDir.x)
+        const back = add(carrier.pos, scale(goalDir, -3))
+        const s1 = add(back, scale(perp, 9))
+        const s2 = add(back, scale(perp, -9))
+        const mates = this.active(carrier.teamIdx)
+          .filter((m) => m.id !== carrier.id && m.info.role !== 'GK')
+          .sort((a, b) => dist(a.pos, carrier.pos) - dist(b.pos, carrier.pos))
+          .slice(0, 2)
+        if (mates[0]) {
+          const first = dist(mates[0].pos, s1) <= dist(mates[0].pos, s2) ? s1 : s2
+          overrides.set(mates[0].id, { target: first, sprint: false })
+          if (mates[1]) {
+            overrides.set(mates[1].id, { target: first === s1 ? s2 : s1, sprint: false })
           }
         }
       }
@@ -1295,18 +1341,24 @@ class MatchSim {
         target = add(target, this.separation(p))
       }
 
-      // Hedefinden çok uzak kalan oyuncu pozisyon almak için de tam koşar
-      const far = !sprint && dist(p.pos, target) > 8
+      // Enerji tasarrufu: pozisyon tutarken tempolu yürüyüş/hafif koşu;
+      // yalnız hedefinden iyice kopan oyuncu tam koşar
+      const far = !sprint && dist(p.pos, target) > 10
       const spd =
         maxSpeed(p.info.attributes) *
         energyFactor(p.energy) *
-        (sprint || far ? 1 : 0.76) *
-        (p.id === carrierId ? 0.78 : 1)
+        (sprint || far ? 1 : 0.7) *
+        (p.id === carrierId ? 0.79 : 1)
       const moved = this.movePlayer(p, target, spd, dt, sprint ? 14 : 6)
 
       p.energy = Math.max(0.35, p.energy - moved * drainPerMeter(p.info.attributes))
       if (moved < 0.1 * dt * spd) p.energy = Math.min(1, p.energy + 0.002 * dt)
     }
+  }
+
+  ballHeight(): number {
+    if (this.ball.kind !== 'inFlight') return 0
+    return 4 * (this.ball.hMax ?? 0) * Math.min(1, this.ball.t) * (1 - Math.min(1, this.ball.t))
   }
 
   recordFrame(): void {
@@ -1325,6 +1377,7 @@ class MatchSim {
     f[o + F_REF_Y] = this.refPos.y
     f[o + F_POSS_HOME] = this.possTicks[0]
     f[o + F_POSS_AWAY] = this.possTicks[1]
+    f[o + F_BALL_H] = this.ballHeight()
     for (let i = 0; i < 22; i++) {
       f[o + F_PLAYERS + i * 2] = this.players[i].pos.x
       f[o + F_PLAYERS + i * 2 + 1] = this.players[i].pos.y

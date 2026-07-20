@@ -159,8 +159,12 @@ export function decide(
     }
   }
   const space = Math.min(1, aheadSpace / 12)
+  // İyi top sürücüler önlerinde alan varken taşımayı sever; kontrada daha da
   const dribbleScore =
-    0.42 + 0.22 * space * dribbleSkill(carrier.info.attributes) - pressure * 0.34
+    0.5 +
+    0.3 * space * dribbleSkill(carrier.info.attributes) +
+    (counter ? 0.08 : 0) -
+    pressure * 0.42
   options.push({ kind: 'dribble', dir: goalDir, score: dribbleScore })
 
   // Degaj: kendi üçte birlik alanında baskı altında

@@ -1,4 +1,5 @@
 import {
+  F_BALL_H,
   F_BALL_X,
   F_BALL_Y,
   F_LABEL,
@@ -111,8 +112,9 @@ export class Renderer {
       }
     }
 
-    // Top
-    this.drawBall(ballX, ballY, ballAttached ? carrierDx : 0, ballAttached ? carrierDy : 0)
+    // Top (yükseklikle: gölge yerde kalır, top büyüyüp yukarı kayar)
+    const ballH = this.lerpVal(f0, f1, F_BALL_H, a)
+    this.drawBall(ballX, ballY, ballAttached ? carrierDx : 0, ballAttached ? carrierDy : 0, ballH)
   }
 
   private drawPlayer(x: number, y: number, color: string, num: number): void {
@@ -153,13 +155,23 @@ export class Renderer {
     }
   }
 
-  private drawBall(x: number, y: number, offDx: number, offDy: number): void {
+  private drawBall(x: number, y: number, offDx: number, offDy: number, h = 0): void {
     const { ctx, cam } = this
     // Taşıyıcının altında kalmasın diye koşu yönünde küçük bir görsel ofset
-    const cx = wx(cam, x + offDx * 1.1)
-    const cy = wy(cam, y + offDy * 1.1)
+    const gx = wx(cam, x + offDx * 1.1)
+    const gy = wy(cam, y + offDy * 1.1)
+
+    // Havadaki top: gölge yerde kalır, top yukarı kayar ve büyür
+    if (h > 0.4) {
+      ctx.beginPath()
+      ctx.ellipse(gx, gy, cam.scale * 0.5, cam.scale * 0.3, 0, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
+      ctx.fill()
+    }
+    const cy = gy - h * cam.scale * 0.55
+    const r = cam.scale * (0.55 + Math.min(0.45, h * 0.09))
     ctx.beginPath()
-    ctx.arc(cx, cy, cam.scale * 0.55, 0, Math.PI * 2)
+    ctx.arc(gx, cy, r, 0, Math.PI * 2)
     ctx.fillStyle = '#f5f5f0'
     ctx.fill()
     ctx.strokeStyle = '#555'

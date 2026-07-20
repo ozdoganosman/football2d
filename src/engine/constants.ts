@@ -22,8 +22,9 @@ export const TICKS_PER_SEC = 10
 export const HALF_SECONDS = 45 * 60
 
 // Frame kaydı düzeni (Float32Array stride)
-// [clockSec, labelIdx, possTeam, ballX, ballY, refX, refY, possHomeTicks, possAwayTicks, 22 × (x, y)]
-export const FRAME_STRIDE = 9 + 22 * 2
+// [clockSec, labelIdx, possTeam, ballX, ballY, refX, refY, possHomeTicks,
+//  possAwayTicks, ballHeight, 22 × (x, y)]
+export const FRAME_STRIDE = 10 + 22 * 2
 
 export const F_CLOCK = 0
 export const F_LABEL = 1
@@ -34,4 +35,5 @@ export const F_REF_X = 5
 export const F_REF_Y = 6
 export const F_POSS_HOME = 7
 export const F_POSS_AWAY = 8
-export const F_PLAYERS = 9
+export const F_BALL_H = 9
+export const F_PLAYERS = 10

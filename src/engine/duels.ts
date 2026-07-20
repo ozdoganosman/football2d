@@ -17,15 +17,15 @@ export function attemptTackle(
 ): TackleOutcome {
   for (const def of opponents) {
     if (def.sentOff || def.tackleCooldown > 0 || def.info.role === 'GK') continue
-    if (dist(def.pos, carrier.pos) > 1.5) continue
-    // Temas var; müdahale nadir ama anlamlı olmalı (her temas 50/50 değil)
-    if (!rng.chance(0.1)) continue
+    if (dist(def.pos, carrier.pos) > 1.8) continue
+    // Temas var; topu sürene karşı müdahale gerçek bir tehdit olmalı
+    if (!rng.chance(0.18)) continue
 
-    if (rng.chance(0.04)) return { kind: 'foul', tacklerId: def.id }
+    if (rng.chance(0.035)) return { kind: 'foul', tacklerId: def.id }
 
     const t = tackleSkill(def.info.attributes)
     const d = dribbleSkill(carrier.info.attributes)
-    const winP = 0.75 * (t / (t + d))
+    const winP = 0.78 * (t / (t + d))
     if (rng.chance(winP)) {
       return { kind: 'won', tacklerId: def.id, toFeet: rng.chance(0.5) }
     }

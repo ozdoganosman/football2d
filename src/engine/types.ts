@@ -57,6 +57,7 @@ export type BallState =
       targetId: number | null
       shotQuality?: number
       offside?: boolean // pas anında alıcı ofsayttaydı; varışta düdük çalınır
+      hMax?: number // uçuş tepe yüksekliği (m); 0/undefined = yerden pas
     }
 
 export type RestartKind =

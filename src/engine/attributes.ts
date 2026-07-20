@@ -7,7 +7,7 @@ import type { PlayerAttributes } from './types'
 export const maxSpeed = (a: PlayerAttributes): number => 4.8 + (a.pace / 20) * 3.6
 
 // Pas hedef sapması (hedefte metre sapma / pas mesafesi oranı)
-export const passErrorRate = (a: PlayerAttributes): number => 0.13 * (1.15 - a.passing / 20)
+export const passErrorRate = (a: PlayerAttributes): number => 0.16 * (1.2 - a.passing / 20)
 
 // Pas hızı m/s
 export const passSpeed = (a: PlayerAttributes): number => 13 + (a.passing / 20) * 5
