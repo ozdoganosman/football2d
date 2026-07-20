@@ -86,6 +86,9 @@ export class Renderer {
 
     // Oyuncular
     const labelIdx = this.fv(f0, F_LABEL)
+    let carrierDx = 0.7
+    let carrierDy = 0.7
+    let ballAttached = false
     for (let i = 0; i < 22; i++) {
       const px = this.lerpVal(f0, f1, F_PLAYERS + i * 2, a)
       const py = this.lerpVal(f0, f1, F_PLAYERS + i * 2 + 1, a)
@@ -95,10 +98,21 @@ export class Renderer {
       const info = team.starters[i % 11]
       this.drawPlayer(px, py, isGk ? team.gkColor : team.color, info.number)
       if (i === labelIdx) this.drawLabel(px, py, info.name)
+      // Top bir oyuncudaysa koşu yönünde, ayağının önünde çizilir
+      if (Math.hypot(px - ballX, py - ballY) < 0.5) {
+        ballAttached = true
+        const dx = this.fv(f1, F_PLAYERS + i * 2) - this.fv(f0, F_PLAYERS + i * 2)
+        const dy = this.fv(f1, F_PLAYERS + i * 2 + 1) - this.fv(f0, F_PLAYERS + i * 2 + 1)
+        const len = Math.hypot(dx, dy)
+        if (len > 0.01) {
+          carrierDx = dx / len
+          carrierDy = dy / len
+        }
+      }
     }
 
     // Top
-    this.drawBall(ballX, ballY, labelIdx)
+    this.drawBall(ballX, ballY, ballAttached ? carrierDx : 0, ballAttached ? carrierDy : 0)
   }
 
   private drawPlayer(x: number, y: number, color: string, num: number): void {
@@ -139,12 +153,11 @@ export class Renderer {
     }
   }
 
-  private drawBall(x: number, y: number, carrierIdx: number): void {
+  private drawBall(x: number, y: number, offDx: number, offDy: number): void {
     const { ctx, cam } = this
-    // Taşıyıcının altında kalmasın diye küçük bir görsel ofset
-    const off = carrierIdx >= 0 ? 0.9 : 0
-    const cx = wx(cam, x + off)
-    const cy = wy(cam, y + off)
+    // Taşıyıcının altında kalmasın diye koşu yönünde küçük bir görsel ofset
+    const cx = wx(cam, x + offDx * 1.1)
+    const cy = wy(cam, y + offDy * 1.1)
     ctx.beginPath()
     ctx.arc(cx, cy, cam.scale * 0.55, 0, Math.PI * 2)
     ctx.fillStyle = '#f5f5f0'

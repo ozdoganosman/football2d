@@ -5,11 +5,36 @@ const S = TICKS_PER_SEC
 
 // Olay listesinden "önemli anlar" pencereleri: şut/gol/kart/korner/penaltı
 // çevresindeki saniyeler izletilir, gerisi atlanır.
+// Pozisyonun doğal başlangıcı sayılan olaylar: top el değiştirdi ya da oyun
+// yeniden başladı. Pencere başlangıcı buraya çekilir ki sahne ortadan açılmasın.
+const BOUNDARY_KINDS = new Set([
+  'kickoff',
+  'throw_in',
+  'corner',
+  'goal_kick',
+  'free_kick',
+  'interception',
+  'tackle',
+])
+
 export function buildHighlights(events: MatchEvent[], frameCount: number): HighlightWindow[] {
   const raw: HighlightWindow[] = []
+
+  // rawStart'tan en fazla 10 sn geriye giderek en yakın doğal sınırı bul
+  const snapToBoundary = (rawStart: number): number => {
+    let boundary = -1
+    for (const e of events) {
+      if (e.tick > rawStart) break
+      if (BOUNDARY_KINDS.has(e.kind) && rawStart - e.tick <= 10 * S) {
+        boundary = e.tick
+      }
+    }
+    return boundary >= 0 ? boundary - S : rawStart
+  }
+
   const push = (start: number, end: number): void => {
     raw.push({
-      startTick: Math.max(0, Math.min(frameCount - 1, start)),
+      startTick: Math.max(0, Math.min(frameCount - 1, snapToBoundary(start))),
       endTick: Math.max(0, Math.min(frameCount - 1, end)),
     })
   }

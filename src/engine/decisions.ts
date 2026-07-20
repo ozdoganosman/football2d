@@ -89,7 +89,8 @@ export function decide(
       0.2 * recvSpace +
       0.42 * (0.55 + progress) -
       0.09 +
-      (passLen > 30 ? -0.016 * (passLen - 30) : 0)
+      (passLen > 30 ? -0.016 * (passLen - 30) : 0) +
+      (passLen < 10 ? -0.012 * (10 - passLen) : 0)
     if (m.info.role === 'GK') score -= 0.3
     // Baskı altındayken güvenli (açık) pas cazipleşir
     score += pressure * laneOpen * 0.12
@@ -102,7 +103,7 @@ export function decide(
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
     if (inBox || quality > 0.22) {
-      const score = quality * 0.95 + (inBox ? 0.16 : 0)
+      const score = quality * 0.9 + (inBox ? 0.12 : 0)
       options.push({ kind: 'shoot', quality, score })
     }
   }

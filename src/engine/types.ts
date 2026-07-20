@@ -83,6 +83,7 @@ export interface PlayerSim {
   teamIdx: number // 0 ev sahibi, 1 deplasman
   slotIdx: number
   pos: Vec2
+  vel: Vec2 // atalet: ani yön değişimleri yumuşatılır
   energy: number // 0..1
   tackleCooldown: number // saniye
   sentOff: boolean

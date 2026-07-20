@@ -32,7 +32,6 @@ import {
 import { FORMATIONS } from './formations'
 import { createRng, type Rng } from './rng'
 import { targetPosition } from './positioning'
-import { stepToward } from './movement'
 import { decide, shotQualityAt, type Decision } from './decisions'
 import { attemptTackle } from './duels'
 import { resolveShot, type ShotOutcome } from './shooting'
@@ -98,6 +97,7 @@ class MatchSim {
           teamIdx: t,
           slotIdx: i,
           pos: vec(0, 0),
+          vel: vec(0, 0),
           energy: 1,
           tackleCooldown: 0,
           sentOff: false,
@@ -184,6 +184,28 @@ class MatchSim {
 
   looseBall(pos: Vec2, velDir: Vec2, speed: number): void {
     this.ball = { kind: 'loose', pos: { ...pos }, vel: scale(norm(velDir), speed) }
+  }
+
+  // Atalet ile hareket: istenen hız vektörüne yumuşak geçiş yapılır,
+  // böylece ani yön/hız sıçramaları (robotik görünüm) engellenir.
+  // agility: sprint kovalamalarında yüksek (keskin dönüş), pozisyon tutarken düşük.
+  movePlayer(p: PlayerSim, target: Vec2, speed: number, dt: number, agility = 6): number {
+    const d = dist(p.pos, target)
+    let desired: Vec2
+    if (d < 0.05) {
+      desired = vec(0, 0)
+    } else {
+      const eff = d < 2 ? speed * Math.max(0.3, d / 2) : speed
+      desired = scale(norm(sub(target, p.pos)), Math.min(eff, d / dt))
+    }
+    const k = Math.min(1, dt * agility)
+    p.vel = {
+      x: p.vel.x + (desired.x - p.vel.x) * k,
+      y: p.vel.y + (desired.y - p.vel.y) * k,
+    }
+    const before = { ...p.pos }
+    p.pos = add(p.pos, scale(p.vel, dt))
+    return dist(before, p.pos)
   }
 
   // --- restart kurulumu ---
@@ -420,7 +442,8 @@ class MatchSim {
     this.phase = { kind: 'open' }
     this.restartTargets = []
     const taker = this.players[takerId]
-    taker.pos = { ...spot }
+    // Kullanıcı zaten yürüyerek geldi; en fazla küçük bir düzeltme olur
+    if (dist(taker.pos, spot) > 2.5) taker.pos = { ...spot }
 
     if (restart === 'kickoff') {
       const mates = this.active(forTeam).filter((p) => p.id !== takerId)
@@ -627,7 +650,6 @@ class MatchSim {
     // saved
     this.pushEvent('shot_saved', by.teamIdx, byId, keeper?.id ?? -1)
     if (keeper && outcome.kind === 'saved' && outcome.held) {
-      keeper.pos = { ...this.ball.to }
       this.possess(keeper.id)
     } else if (keeper) {
       // öne çeldi → ceza sahasında tehlikeli boş top
@@ -675,15 +697,16 @@ class MatchSim {
       }
     }
 
-    const attClose = att !== null && attD < 2.4
-    const defClose = def !== null && defD < 2.4
+    // Dar varış yarıçapı: uzak kalan yetişemez, top kısa süre boşa düşer ve
+    // doğal bir kapışma çıkar (ışınlanma yok)
+    const attClose = att !== null && attD < 1.6
+    const defClose = def !== null && defD < 1.8
 
     if (attClose && defClose && att && def) {
       // Çekişmeli varış: yakınlık + pozisyon alma becerisi
-      const wa = (2.4 - attD) * interceptSkill(att.info.attributes) * 1.1
-      const wd = (2.4 - defD) * interceptSkill(def.info.attributes)
+      const wa = (1.6 - attD) * interceptSkill(att.info.attributes) * 1.25
+      const wd = (1.8 - defD) * interceptSkill(def.info.attributes)
       if (this.rng.next() < wa / (wa + wd)) {
-        att.pos = { ...to }
         this.possess(att.id)
         this.passesCompleted[by.teamIdx]++
       } else {
@@ -693,7 +716,6 @@ class MatchSim {
       return
     }
     if (attClose && att) {
-      att.pos = { ...to }
       this.possess(att.id)
       this.passesCompleted[by.teamIdx]++
       return
@@ -768,10 +790,16 @@ class MatchSim {
           p.teamIdx === this.phase.forTeam,
         )
       const spd = maxSpeed(p.info.attributes) * energyFactor(p.energy) * 0.85
-      p.pos = stepToward(p.pos, target, spd, dt)
+      this.movePlayer(p, target, spd, dt)
     }
     this.phase.timer--
-    if (this.phase.timer <= 0) this.executeRestart()
+    if (this.phase.timer <= 0) {
+      // Kullanıcı topun başına gelene kadar bekle (makul bir üst sınırla)
+      const taker = this.players[this.phase.takerId]
+      if (dist(taker.pos, this.phase.spot) < 2 || this.phase.timer < -60) {
+        this.executeRestart()
+      }
+    }
   }
 
   stepOpen(dt: number): void {
@@ -895,7 +923,6 @@ class MatchSim {
       const passingTeam = this.players[b.byId].teamIdx
       for (const o of this.active(1 - passingTeam)) {
         if (dist(o.pos, pos) < 0.9 && this.rng.chance(0.09 * interceptSkill(o.info.attributes))) {
-          o.pos = { ...pos }
           this.possess(o.id)
           this.pushEvent('interception', o.teamIdx, o.id)
           return
@@ -905,7 +932,6 @@ class MatchSim {
       if (b.flight === 'cross') {
         const gk = this.keeperOf(1 - passingTeam)
         if (gk && dist(gk.pos, pos) < 2.2 && this.rng.chance(0.4)) {
-          gk.pos = { ...pos }
           this.possess(gk.id)
           this.pushEvent('interception', gk.teamIdx, gk.id)
           return
@@ -1012,12 +1038,15 @@ class MatchSim {
     for (const p of this.active()) {
       let target: Vec2
       let sprint = false
+      let slow = 1
 
       if (p.id === carrierId) {
         if (p.dribbleDir) {
           target = add(p.pos, scale(p.dribbleDir, 6))
           sprint = true
         } else {
+          // Karar anında top ayağında durur; atalet ani duruşu zaten yumuşatır.
+          // (Sürüklenme denendi: temas penceresini bozup golleri patlatıyor.)
           target = p.pos
         }
       } else if (p.id === receiverId && flightTo) {
@@ -1035,17 +1064,15 @@ class MatchSim {
         target = targetPosition(this.slotOf(p), this.attackDir[p.teamIdx], bp, possTeam === p.teamIdx)
       }
 
-      const before = { ...p.pos }
       // Hedefinden çok uzak kalan oyuncu pozisyon almak için de tam koşar
       const far = !sprint && dist(p.pos, target) > 8
       const spd =
         maxSpeed(p.info.attributes) *
         energyFactor(p.energy) *
         (sprint || far ? 1 : 0.76) *
-        (p.id === carrierId ? 0.78 : 1)
-      p.pos = stepToward(p.pos, target, spd, dt)
+        (p.id === carrierId ? 0.78 * slow : 1)
+      const moved = this.movePlayer(p, target, spd, dt, sprint ? 14 : 6)
 
-      const moved = dist(before, p.pos)
       p.energy = Math.max(0.35, p.energy - moved * drainPerMeter(p.info.attributes))
       if (moved < 0.1 * dt * spd) p.energy = Math.min(1, p.energy + 0.002 * dt)
     }

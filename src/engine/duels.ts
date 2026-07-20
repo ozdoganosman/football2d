@@ -18,8 +18,8 @@ export function attemptTackle(
   for (const def of opponents) {
     if (def.sentOff || def.tackleCooldown > 0 || def.info.role === 'GK') continue
     if (dist(def.pos, carrier.pos) > 1.6) continue
-    // Temas var; her tick %16 ihtimalle deneme
-    if (!rng.chance(0.16)) continue
+    // Temas var; her tick %22 ihtimalle deneme
+    if (!rng.chance(0.22)) continue
 
     if (rng.chance(0.02)) return { kind: 'foul', tacklerId: def.id }
 
