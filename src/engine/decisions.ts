@@ -11,6 +11,7 @@ import type { Rng } from './rng'
 
 export type Decision =
   | { kind: 'pass'; targetId: number; score: number }
+  | { kind: 'cross'; targetId: number; score: number }
   | { kind: 'shoot'; quality: number; score: number }
   | { kind: 'dribble'; dir: Vec2; score: number }
   | { kind: 'clear'; score: number }
@@ -35,14 +36,14 @@ export function shotQualityAt(
   const goal: Vec2 = { x: HALF_LENGTH, y: 0 }
   const d = dist(att, goal)
   if (d > 32) return 0
-  const distFactor = Math.max(0, 1 - d / 34)
+  const distFactor = Math.max(0, 1 - d / 38)
   const angleFactor = 1 - Math.min(1, Math.abs(att.y) / 24) * 0.8
   let nearest = 99
   for (const o of opponents) {
     if (o.sentOff || o.info.role === 'GK') continue
     nearest = Math.min(nearest, dist(o.pos, shooter.pos))
   }
-  const pressureFactor = 0.4 + 0.6 * Math.min(1, nearest / 6)
+  const pressureFactor = 0.5 + 0.5 * Math.min(1, nearest / 6)
   return distFactor * angleFactor * pressureFactor * shootSkill(shooter.info.attributes)
 }
 
@@ -55,6 +56,7 @@ export function decide(
   opponents: PlayerSim[],
   attackDir: 1 | -1,
   rng: Rng,
+  counter = false, // top yeni kazanıldı: dikine oyna, hızlı bitir
 ): Decision {
   const att = toAttack(carrier.pos, attackDir)
   const myValue = positionValue(att)
@@ -67,11 +69,22 @@ export function decide(
   }
   const pressure = Math.max(0, 1 - nearestOppDist / 6) // 0 rahat, 1 üstünde adam var
 
+  // Ofsayt çizgisi: sondan ikinci rakibin derinliği (orta çizgi alt sınır)
+  const oppDepths = opponents
+    .filter((o) => !o.sentOff)
+    .map((o) => toAttack(o.pos, attackDir).x)
+    .sort((a, b) => b - a)
+  const offsideLine = Math.max(oppDepths[1] ?? 0, 0)
+
   // Pas seçenekleri
   for (const m of teammates) {
     if (m === carrier || m.sentOff) continue
     const passLen = dist(carrier.pos, m.pos)
     if (passLen < 3 || passLen > 45) continue
+    // Bariz ofsayttaki adama pas düşünülmez; çizgiye yakın sınır durumlar
+    // denenir ve bazen bayrağa takılır (doğal ofsaytlar)
+    const mAttX = toAttack(m.pos, attackDir).x
+    if (mAttX > offsideLine + 1.2 && mAttX > att.x && mAttX > 0) continue
 
     let laneMin = 99
     let recvMin = 99
@@ -84,12 +97,13 @@ export function decide(
     const recvSpace = Math.min(1, recvMin / 8)
     const progress = positionValue(toAttack(m.pos, attackDir)) - myValue
 
+    const progressW = counter ? 0.58 : 0.42
     let score =
       0.26 * laneOpen +
       0.2 * recvSpace +
-      0.42 * (0.55 + progress) -
+      progressW * (0.55 + progress) -
       0.09 +
-      (passLen > 30 ? -0.016 * (passLen - 30) : 0) +
+      (passLen > 26 ? -0.02 * (passLen - 26) : 0) +
       (passLen < 10 ? -0.012 * (10 - passLen) : 0)
     if (m.info.role === 'GK') score -= 0.3
     // Baskı altındayken güvenli (açık) pas cazipleşir
@@ -102,9 +116,34 @@ export function decide(
   if (quality > 0.02) {
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
-    if (inBox || quality > 0.22) {
-      const score = quality * 0.9 + (inBox ? 0.12 : 0)
+    if (inBox || quality > 0.13) {
+      const score = quality * 1.15 + (inBox ? 0.2 : 0)
       options.push({ kind: 'shoot', quality, score })
+    }
+  }
+
+  // Orta: son üçte birlik alanda kanattaysa ceza sahasındaki arkadaşa orta aç
+  if (att.x > 24 && Math.abs(att.y) > 15) {
+    let bestCross: PlayerSim | null = null
+    let bestCrossScore = -1
+    for (const m of teammates) {
+      if (m === carrier || m.sentOff || m.info.role === 'GK') continue
+      const mAtt = toAttack(m.pos, attackDir)
+      if (mAtt.x < 28 || Math.abs(mAtt.y) > 15) continue
+      let recvMin = 99
+      for (const o of opponents) {
+        if (!o.sentOff) recvMin = Math.min(recvMin, dist(o.pos, m.pos))
+      }
+      const s = Math.min(1, recvMin / 6)
+      if (s > bestCrossScore) {
+        bestCrossScore = s
+        bestCross = m
+      }
+    }
+    if (bestCross && bestCrossScore > 0.4) {
+      // Yalnız kutuda gerçekten boş adam varsa orta cazip olsun
+      const score = 0.3 + bestCrossScore * 0.22 - pressure * 0.12
+      options.push({ kind: 'cross', targetId: bestCross.id, score })
     }
   }
 

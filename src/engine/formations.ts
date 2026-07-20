@@ -26,9 +26,10 @@ export const FORMATIONS: Record<FormationId, FormationSlot[]> = {
     { depth: 0.38, width: 0, role: 'MF' },
     { depth: 0.46, width: -0.34, role: 'MF' },
     { depth: 0.46, width: 0.34, role: 'MF' },
-    { depth: 0.62, width: -0.58, role: 'FW' },
+    // Kanat forvetleri savunmada orta sahaya iner (4-5-1) → rol MF
+    { depth: 0.62, width: -0.58, role: 'MF' },
     { depth: 0.7, width: 0, role: 'FW' },
-    { depth: 0.62, width: 0.58, role: 'FW' },
+    { depth: 0.62, width: 0.58, role: 'MF' },
   ],
   '4-2-3-1': [
     { depth: 0.04, width: 0, role: 'GK' },

@@ -25,6 +25,7 @@ const sums = {
   fouls: [0, 0],
   yellows: [0, 0],
   reds: [0, 0],
+  offsides: [0, 0],
   passes: [0, 0],
   passAcc: [0, 0],
 }
@@ -46,6 +47,7 @@ for (let m = 0; m < matches; m++) {
     sums.fouls[t] += r.stats.fouls[t]
     sums.yellows[t] += r.stats.yellowCards[t]
     sums.reds[t] += r.stats.redCards[t]
+    sums.offsides[t] += r.stats.offsides[t]
     sums.passes[t] += r.stats.passes[t]
     sums.passAcc[t] += r.stats.passes[t] > 0 ? r.stats.passesCompleted[t] / r.stats.passes[t] : 0
   }
@@ -66,6 +68,7 @@ console.log(`Korner       ${avg(sums.corners[0]).padStart(6)}  ${avg(sums.corner
 console.log(`Faul         ${avg(sums.fouls[0]).padStart(6)}  ${avg(sums.fouls[1]).padStart(6)}`)
 console.log(`Sarı kart    ${avg(sums.yellows[0]).padStart(6)}  ${avg(sums.yellows[1]).padStart(6)}`)
 console.log(`Kırmızı      ${avg(sums.reds[0]).padStart(6)}  ${avg(sums.reds[1]).padStart(6)}`)
+console.log(`Ofsayt       ${avg(sums.offsides[0]).padStart(6)}  ${avg(sums.offsides[1]).padStart(6)}`)
 console.log(`Pas          ${avg(sums.passes[0]).padStart(6)}  ${avg(sums.passes[1]).padStart(6)}`)
 console.log(
   `Pas isabeti %${((sums.passAcc[0] / matches) * 100).toFixed(0).padStart(5)}  %${((sums.passAcc[1] / matches) * 100).toFixed(0).padStart(4)}`,

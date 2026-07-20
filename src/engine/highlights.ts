@@ -13,6 +13,7 @@ const BOUNDARY_KINDS = new Set([
   'corner',
   'goal_kick',
   'free_kick',
+  'offside',
   'interception',
   'tackle',
 ])

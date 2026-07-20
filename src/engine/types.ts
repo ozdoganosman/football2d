@@ -56,6 +56,7 @@ export type BallState =
       byId: number
       targetId: number | null
       shotQuality?: number
+      offside?: boolean // pas anında alıcı ofsayttaydı; varışta düdük çalınır
     }
 
 export type RestartKind =
@@ -108,6 +109,7 @@ export type MatchEventKind =
   | 'throw_in'
   | 'goal_kick'
   | 'free_kick'
+  | 'offside'
   | 'half_end'
   | 'full_time'
 
@@ -131,6 +133,7 @@ export interface MatchStats {
   fouls: [number, number]
   yellowCards: [number, number]
   redCards: [number, number]
+  offsides: [number, number]
   passes: [number, number]
   passesCompleted: [number, number]
 }

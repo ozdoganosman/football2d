@@ -33,7 +33,10 @@ export function targetPosition(
   }
 
   const home = homePositionAtt(slot)
-  const widthScale = hasPossession ? 1.05 : 0.82
+  // Topsuz blok kendi kalesine yaklaştıkça daralır: top kendi kutusuna
+  // indiğinde bekler içeri kapanır, ceza sahası önü kalabalıklaşır
+  const defDepth = Math.min(1, Math.max(0, (-ballAtt.x - 10) / 30))
+  const widthScale = hasPossession ? 1.05 : 0.82 - 0.3 * defDepth
   const push = hasPossession ? 5 : -5
 
   let x = home.x + ballAtt.x * 0.3 + push
@@ -44,9 +47,15 @@ export function targetPosition(
   // maxAhead: topun önünde ne kadar yüksekte kalabilir (top kendi sahasına
   // indiğinde orta saha yukarıda çakılı kalmasın, kutu önüne geri koşsun).
   if (!hasPossession) {
-    const maxDrop = slot.role === 'DF' ? 15 : slot.role === 'MF' ? 11 : 4
-    const maxAhead = slot.role === 'DF' ? 6 : slot.role === 'MF' ? 14 : 26
-    x = Math.max(x, ballAtt.x - maxDrop)
+    // Forvetler de topsuzken geri döner (4-3-3 savunmada 4-5-1'e yaklaşır);
+    // rakip sahada kamp kurup kontra bekleyemezler
+    const maxDrop = slot.role === 'DF' ? 19 : slot.role === 'MF' ? 14 : 5
+    const maxAhead = slot.role === 'DF' ? 4 : slot.role === 'MF' ? 12 : 15
+    // Hat itme tavanı: top rakip sahanın derinindeyken blok topa kadar
+    // sürüklenmez — savunma hattı orta sahayı pek geçmez, orta saha sınırlı
+    // eşlik eder, yalnız forvetler yüksekte karşılar (full saha pres yok)
+    const pressCap = slot.role === 'DF' ? 10 : slot.role === 'MF' ? 24 : 45
+    x = Math.max(x, Math.min(ballAtt.x, pressCap) - maxDrop)
     x = Math.min(x, ballAtt.x + maxAhead)
   }
 
