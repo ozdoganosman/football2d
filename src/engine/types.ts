@@ -92,6 +92,7 @@ export interface PlayerSim {
   yellows: number
   dribbleDir: Vec2 | null // topu taşırken seçilen yön
   dribbleTouchTick: number // vur-kaç ritmi için son dokunuş referansı
+  dribblePeriod: number // bu dokunuşun süresi (tick) — her vuruşta değişir
 }
 
 export type MatchEventKind =

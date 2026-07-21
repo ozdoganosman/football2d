@@ -114,6 +114,7 @@ class MatchSim {
           yellows: 0,
           dribbleDir: null,
           dribbleTouchTick: 0,
+          dribblePeriod: 7,
         })
       })
     }
@@ -145,10 +146,14 @@ class MatchSim {
     if (b.kind === 'loose') return b.pos
     if (b.kind === 'possessed') {
       const p = this.players[b.playerId]
-      // Vur-kaç dribling: top ayağa yapışmaz — öne vurulur, oyuncu kovalar
+      // Vur-kaç dribling: top öne vurulur, yuvarlanıp yavaşlar, oyuncu
+      // yetişir — sürekli bir eğri, ani sıçrama yok
       if (p.dribbleDir) {
-        const phase = ((this.tick - p.dribbleTouchTick) % 7) / 7
-        const lead = 0.5 + 2.2 * (1 - phase)
+        const phase = Math.min(
+          1,
+          (this.tick - p.dribbleTouchTick) / Math.max(1, p.dribblePeriod),
+        )
+        const lead = 0.4 + 0.34 * p.dribblePeriod * Math.sin(Math.PI * phase)
         const raw = add(p.pos, scale(p.dribbleDir, lead))
         return {
           x: Math.max(-HALF_LENGTH + 0.3, Math.min(HALF_LENGTH - 0.3, raw.x)),
@@ -927,6 +932,19 @@ class MatchSim {
     const carrier = this.players[this.ball.playerId]
     const opponents = this.active(1 - carrier.teamIdx)
 
+    // Vur-kaç: dokunuş zamanı geldiyse yeni vuruş — süresi ve şiddeti
+    // rastgele, yön hafifçe kıvrılır (yılankavi, organik sürüş).
+    // Ara sıra top fazla açılır (ağır dokunuş).
+    if (carrier.dribbleDir && this.tick - carrier.dribbleTouchTick >= carrier.dribblePeriod) {
+      carrier.dribbleTouchTick = this.tick
+      carrier.dribblePeriod = this.rng.chance(0.12) ? this.rng.int(9, 12) : this.rng.int(5, 9)
+      const ang = this.rng.range(-0.35, 0.35)
+      const cos = Math.cos(ang)
+      const sin = Math.sin(ang)
+      const d = carrier.dribbleDir
+      carrier.dribbleDir = norm({ x: d.x * cos - d.y * sin, y: d.x * sin + d.y * cos })
+    }
+
     // Müdahale denemeleri
     const outcome = attemptTackle(carrier, opponents, this.rng)
     if (outcome.kind === 'foul') {
@@ -1039,6 +1057,7 @@ class MatchSim {
 
       carrier.dribbleDir = noisy
       carrier.dribbleTouchTick = this.tick
+      carrier.dribblePeriod = this.rng.int(5, 9)
       this.nextDecisionTick = this.tick + 11
     }
   }
@@ -1431,7 +1450,7 @@ class MatchSim {
         target = add(p.pos, scale(p.dribbleDir as Vec2, 6))
         sprint = true
         // Vur-kaç ritmi: topa vururken yavaşlar, top öndeyken hızlanır
-        dribblePhase = ((this.tick - p.dribbleTouchTick) % 7) / 7
+        dribblePhase = Math.min(1, (this.tick - p.dribbleTouchTick) / Math.max(1, p.dribblePeriod))
       } else if (ov) {
         target = ov.target
         sprint = ov.sprint
@@ -1468,9 +1487,14 @@ class MatchSim {
       // Enerji tasarrufu: pozisyon tutarken tempolu yürüyüş/hafif koşu;
       // yalnız hedefinden iyice kopan oyuncu tam koşar
       const far = !sprint && dist(p.pos, target) > 10
-      // Vur-kaç: vuruş anında (phase 0) yavaş, topu kovalarken hızlı
+      // Vur-kaç: vuruş anlarında (başta/sonda) yavaş, top öndeyken hızlı —
+      // yumuşak sinüs profili
       const carrierFactor =
-        p.id === carrierId ? (dribblePhase >= 0 ? 0.68 + 0.26 * dribblePhase : 0.79) : 1
+        p.id === carrierId
+          ? dribblePhase >= 0
+            ? 0.64 + 0.22 * Math.sin(Math.PI * dribblePhase)
+            : 0.79
+          : 1
       const spd =
         maxSpeed(p.info.attributes) *
         energyFactor(p.energy) *
