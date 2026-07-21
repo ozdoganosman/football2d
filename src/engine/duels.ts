@@ -17,7 +17,8 @@ export function attemptTackle(
 ): TackleOutcome {
   for (const def of opponents) {
     if (def.sentOff || def.tackleCooldown > 0 || def.info.role === 'GK') continue
-    if (dist(def.pos, carrier.pos) > 1.8) continue
+    // Çarpışma tabanı 2.0 m: temas bölgesi 2.0-2.4 arasıdır
+    if (dist(def.pos, carrier.pos) > 2.4) continue
     // Temas var; topu sürene karşı müdahale gerçek bir tehdit olmalı
     if (!rng.chance(0.18)) continue
 

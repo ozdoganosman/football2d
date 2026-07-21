@@ -43,7 +43,8 @@ export function shotQualityAt(
     if (o.sentOff || o.info.role === 'GK') continue
     nearest = Math.min(nearest, dist(o.pos, shooter.pos))
   }
-  const pressureFactor = 0.5 + 0.5 * Math.min(1, nearest / 6)
+  // Çarpışma tabanı 2.0 m: baskı ölçümü tabandan itibaren sayılır
+  const pressureFactor = 0.5 + 0.5 * Math.min(1, Math.max(0, (nearest - 1.8) / 5))
   return distFactor * angleFactor * pressureFactor * shootSkill(shooter.info.attributes)
 }
 
@@ -121,8 +122,8 @@ export function decide(
   if (quality > 0.02) {
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
-    if (inBox || quality > 0.13) {
-      const score = quality * 1.15 + (inBox ? 0.2 : 0)
+    if (inBox || quality > 0.16) {
+      const score = quality * 1.1 + (inBox ? 0.14 : 0)
       options.push({ kind: 'shoot', quality, score })
     }
   }

@@ -126,7 +126,9 @@ export class Renderer {
 
   private drawPlayer(x: number, y: number, color: string, num: number): void {
     const { ctx, cam } = this
-    const r = cam.scale * 1.25
+    // Yarıçap ~1.0 m: çarpışma tabanı 2.0 m olduğundan daireler en fazla
+    // birbirine değer, asla üst üste binmez
+    const r = cam.scale * 1.0
     const cx = wx(cam, x)
     const cy = wy(cam, y)
     ctx.beginPath()
@@ -141,15 +143,15 @@ export class Renderer {
     ctx.lineWidth = Math.max(1, cam.scale * 0.22)
     ctx.stroke()
     ctx.fillStyle = '#ffffff'
-    ctx.font = `bold ${Math.max(7, cam.scale * 1.3)}px Verdana, sans-serif`
+    ctx.font = `bold ${Math.max(7, cam.scale * 1.1)}px Verdana, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(String(num), cx, cy + cam.scale * 0.1)
+    ctx.fillText(String(num), cx, cy + cam.scale * 0.08)
   }
 
   private drawDownedPlayer(x: number, y: number, color: string, num: number): void {
     const { ctx, cam } = this
-    const r = cam.scale * 1.25
+    const r = cam.scale * 1.0
     const cx = wx(cam, x)
     const cy = wy(cam, y)
     ctx.beginPath()

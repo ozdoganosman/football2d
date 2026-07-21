@@ -10,11 +10,11 @@ export type ShotOutcome =
 
 // Şut varış anında çözülür. quality 0..1 karar anında hesaplanmıştır.
 export function resolveShot(quality: number, keeper: PlayerSim | null, rng: Rng): ShotOutcome {
-  const offTargetP = Math.min(0.75, 0.27 + 0.35 * (1 - quality))
+  const offTargetP = Math.min(0.75, 0.31 + 0.35 * (1 - quality))
   if (rng.chance(offTargetP)) return { kind: 'missed' }
 
   const g = keeper && !keeper.sentOff ? gkSkill(keeper.info.attributes) : 0.15
-  const goalP = Math.min(0.9, Math.max(0.05, quality * (1.7 - g)))
+  const goalP = Math.min(0.9, Math.max(0.05, quality * (1.5 - g)))
   if (rng.chance(goalP)) return { kind: 'goal' }
 
   // Kurtarış: çoğunlukla kalecide kalır, bazen korner ya da öne çelme

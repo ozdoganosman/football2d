@@ -257,6 +257,53 @@ class MatchSim {
     return dist(before, p.pos)
   }
 
+  // Sert çarpışma çözümü: hiçbir iki oyuncu MIN mesafeden yakın duramaz.
+  // Hedef sapması değil pozisyon kuralı — üst üste binme fiziksel olarak
+  // imkânsız. Yerde yatan oyuncu itilmez, diğerleri ondan uzaklaşır.
+  resolveCollisions(): void {
+    const MIN = 2.0
+    const act = this.active()
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < act.length; i++) {
+        for (let j = i + 1; j < act.length; j++) {
+          const a = act[i]
+          const b = act[j]
+          const dx = b.pos.x - a.pos.x
+          const dy = b.pos.y - a.pos.y
+          let d = Math.hypot(dx, dy)
+          if (d >= MIN) continue
+          let ux: number
+          let uy: number
+          if (d < 1e-6) {
+            // Tam üst üste: kimliklerden türetilen determinist yön
+            const ang = ((a.id * 37 + b.id * 101) % 360) * (Math.PI / 180)
+            ux = Math.cos(ang)
+            uy = Math.sin(ang)
+            d = 0
+          } else {
+            ux = dx / d
+            uy = dy / d
+          }
+          const aDown = a.id === this.downedId && this.tick < this.downedUntil
+          const bDown = b.id === this.downedId && this.tick < this.downedUntil
+          const overlap = MIN - d
+          if (aDown) {
+            b.pos.x += ux * overlap
+            b.pos.y += uy * overlap
+          } else if (bDown) {
+            a.pos.x -= ux * overlap
+            a.pos.y -= uy * overlap
+          } else {
+            a.pos.x -= ux * (overlap / 2)
+            a.pos.y -= uy * (overlap / 2)
+            b.pos.x += ux * (overlap / 2)
+            b.pos.y += uy * (overlap / 2)
+          }
+        }
+      }
+    }
+  }
+
   // --- restart kurulumu ---
 
   setupRestart(kind: RestartKind, forTeam: number, spot: Vec2, timer: number): void {
@@ -798,13 +845,16 @@ class MatchSim {
     // Dar varış yarıçapı: uzak kalan yetişemez, top kısa süre boşa düşer ve
     // doğal bir kapışma çıkar (ışınlanma yok). Markajcılar adamlarının 1.4 m
     // dibinde durduğu için varışlara doğal olarak ortak olurlar.
-    const attClose = att !== null && attD < 1.8
-    const defClose = def !== null && defD < 1.5
+    // Çarpışma tabanı 2.0 m: savunmacı alıcının dibine giremez, bu yüzden
+    // çekişme yarıçapı daha geniş tutulur ama alıcı avantajlıdır (top ona
+    // doğru oynanmıştır)
+    const attClose = att !== null && attD < 2.2
+    const defClose = def !== null && defD < 2.7
 
     if (attClose && defClose && att && def) {
       // Çekişmeli varış: yakınlık + pozisyon alma becerisi
-      const wa = (1.8 - attD) * interceptSkill(att.info.attributes)
-      const wd = (1.5 - defD) * interceptSkill(def.info.attributes) * 0.95
+      const wa = (2.2 - attD) * interceptSkill(att.info.attributes)
+      const wd = (2.7 - defD) * interceptSkill(def.info.attributes) * 0.55
       if (this.rng.next() < wa / (wa + wd)) {
         this.possess(att.id)
         this.passesCompleted[by.teamIdx]++
@@ -903,11 +953,12 @@ class MatchSim {
       const spd = maxSpeed(p.info.attributes) * energyFactor(p.energy) * 0.85
       this.movePlayer(p, target, spd, dt)
     }
+    this.resolveCollisions()
     this.phase.timer--
     if (this.phase.timer <= 0) {
       // Kullanıcı topun başına gelene kadar bekle (makul bir üst sınırla)
       const taker = this.players[this.phase.takerId]
-      if (dist(taker.pos, this.phase.spot) < 2 || this.phase.timer < -60) {
+      if (dist(taker.pos, this.phase.spot) < 2.6 || this.phase.timer < -60) {
         this.executeRestart()
       }
     }
@@ -1505,6 +1556,8 @@ class MatchSim {
       p.energy = Math.max(0.35, p.energy - moved * drainPerMeter(p.info.attributes))
       if (moved < 0.1 * dt * spd) p.energy = Math.min(1, p.energy + 0.002 * dt)
     }
+
+    this.resolveCollisions()
   }
 
   ballHeight(): number {
