@@ -2,6 +2,7 @@ import {
   F_BALL_H,
   F_BALL_X,
   F_BALL_Y,
+  F_DOWN,
   F_LABEL,
   F_PLAYERS,
   F_REF_X,
@@ -87,6 +88,7 @@ export class Renderer {
 
     // Oyuncular
     const labelIdx = this.fv(f0, F_LABEL)
+    const downIdx = this.fv(f0, F_DOWN)
     let carrierDx = 0.7
     let carrierDy = 0.7
     let ballAttached = false
@@ -97,7 +99,12 @@ export class Renderer {
       const team = result.teams[teamIdx]
       const isGk = i % 11 === 0
       const info = team.starters[i % 11]
-      this.drawPlayer(px, py, isGk ? team.gkColor : team.color, info.number)
+      if (i === downIdx) {
+        // Faulle yerde yatan oyuncu: basık elips
+        this.drawDownedPlayer(px, py, isGk ? team.gkColor : team.color, info.number)
+      } else {
+        this.drawPlayer(px, py, isGk ? team.gkColor : team.color, info.number)
+      }
       if (i === labelIdx) this.drawLabel(px, py, info.name)
       // Top bir oyuncudaysa koşu yönünde, ayağının önünde çizilir
       if (Math.hypot(px - ballX, py - ballY) < 0.5) {
@@ -138,6 +145,25 @@ export class Renderer {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(String(num), cx, cy + cam.scale * 0.1)
+  }
+
+  private drawDownedPlayer(x: number, y: number, color: string, num: number): void {
+    const { ctx, cam } = this
+    const r = cam.scale * 1.25
+    const cx = wx(cam, x)
+    const cy = wy(cam, y)
+    ctx.beginPath()
+    ctx.ellipse(cx, cy + r * 0.2, r * 1.5, r * 0.6, 0, 0, Math.PI * 2)
+    ctx.fillStyle = color
+    ctx.fill()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = Math.max(1, cam.scale * 0.22)
+    ctx.stroke()
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `bold ${Math.max(6, cam.scale * 1.0)}px Verdana, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(String(num), cx, cy + r * 0.2)
   }
 
   private drawDot(x: number, y: number, color: string, r: number, text?: string): void {

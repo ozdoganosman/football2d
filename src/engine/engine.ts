@@ -3,6 +3,7 @@ import {
   F_BALL_X,
   F_BALL_Y,
   F_CLOCK,
+  F_DOWN,
   F_LABEL,
   F_PLAYERS,
   F_POSS_AWAY,
@@ -67,6 +68,9 @@ class MatchSim {
   restartTargets: (Vec2 | null)[] = []
   engagerId: [number, number] = [-1, -1] // takım başına topa giden görevli (histerezis)
   lastTurnover = { tick: -999, team: -1 } // kontra penceresi takibi
+  downedId = -1 // faulle yerde kalan oyuncu
+  downedUntil = -1
+  freezeUntil = -1 // düdük sonrası herkesin durduğu an
   half: 1 | 2 = 1
   halfClock = 0
   stoppage = 0
@@ -109,6 +113,7 @@ class MatchSim {
           sentOff: false,
           yellows: 0,
           dribbleDir: null,
+          dribbleTouchTick: 0,
         })
       })
     }
@@ -138,8 +143,30 @@ class MatchSim {
     if (this.phase.kind === 'restart') return this.phase.spot
     const b = this.ball
     if (b.kind === 'loose') return b.pos
-    if (b.kind === 'possessed') return this.players[b.playerId].pos
-    return lerp(b.from, b.to, Math.min(1, b.t))
+    if (b.kind === 'possessed') {
+      const p = this.players[b.playerId]
+      // Vur-kaç dribling: top ayağa yapışmaz — öne vurulur, oyuncu kovalar
+      if (p.dribbleDir) {
+        const phase = ((this.tick - p.dribbleTouchTick) % 7) / 7
+        const lead = 0.5 + 2.2 * (1 - phase)
+        const raw = add(p.pos, scale(p.dribbleDir, lead))
+        return {
+          x: Math.max(-HALF_LENGTH + 0.3, Math.min(HALF_LENGTH - 0.3, raw.x)),
+          y: Math.max(-HALF_WIDTH + 0.3, Math.min(HALF_WIDTH - 0.3, raw.y)),
+        }
+      }
+      return p.pos
+    }
+    return this.flightPos(b)
+  }
+
+  // Uçuş konumu: yerden paslar sürtünmeyle yavaşlayarak varır (ease-out),
+  // havadan toplar ve şutlar sabit tempoda gider
+  flightPos(b: Extract<BallState, { kind: 'inFlight' }>): Vec2 {
+    const tt = Math.min(1, b.t)
+    const eased =
+      b.flight === 'shot' || (b.hMax ?? 0) > 0 ? tt : 1 - Math.pow(1 - tt, 1.6)
+    return lerp(b.from, b.to, eased)
   }
 
   possTeam(): number {
@@ -382,6 +409,8 @@ class MatchSim {
       passerPressure = Math.min(passerPressure, dist(o.pos, by.pos))
     }
     if (passerPressure < 5) err *= 1 + (1 - passerPressure / 5) * 0.7
+    // Ara sıra pas ayağa oturmaz: gözle görülür bozuk pas
+    if (this.rng.chance(0.06)) err *= 2.5
     const target = {
       x: to.pos.x + lead.x + this.rng.range(-1, 1) * err * d0,
       y: to.pos.y + lead.y + this.rng.range(-1, 1) * err * d0,
@@ -599,6 +628,12 @@ class MatchSim {
     this.fouls[tackler.teamIdx]++
     this.addStoppage(8)
     this.pushEvent('foul', tackler.teamIdx, tacklerId, victimId)
+
+    // Faul okunur olsun: düdükte herkes kısa an durur, faul yiyen yerde kalır
+    this.freezeUntil = this.tick + 9
+    this.downedId = victimId
+    this.downedUntil = this.tick + 22
+    victim.vel = vec(0, 0)
 
     // Kart zarları
     if (this.rng.chance(0.003)) {
@@ -838,7 +873,16 @@ class MatchSim {
 
   stepRestart(dt: number): void {
     if (this.phase.kind !== 'restart') return
+    // Düdük anı: kısa bir donma — faul/penaltı algılanabilir olur
+    if (this.tick < this.freezeUntil) {
+      this.phase.timer--
+      return
+    }
     for (const p of this.active()) {
+      if (p.id === this.downedId && this.tick < this.downedUntil) {
+        p.vel = vec(0, 0)
+        continue
+      }
       const t = this.restartTargets[p.id]
       let target =
         t ??
@@ -994,6 +1038,7 @@ class MatchSim {
       }
 
       carrier.dribbleDir = noisy
+      carrier.dribbleTouchTick = this.tick
       this.nextDecisionTick = this.tick + 11
     }
   }
@@ -1022,7 +1067,7 @@ class MatchSim {
     if (this.ball.kind !== 'inFlight') return
     const b = this.ball
     b.t += dt / b.duration
-    const pos = lerp(b.from, b.to, Math.min(1, b.t))
+    const pos = this.flightPos(b)
 
     if (b.flight === 'shot') {
       if (b.t >= 1 || Math.abs(pos.x) >= HALF_LENGTH - 0.1) {
@@ -1365,7 +1410,14 @@ class MatchSim {
     for (const p of this.active()) {
       let target: Vec2
       let sprint = false
+      let dribblePhase = -1
       const ov = overrides.get(p.id)
+
+      // Faulle yerde kalan oyuncu kalkana kadar hareket etmez
+      if (p.id === this.downedId && this.tick < this.downedUntil) {
+        p.vel = vec(0, 0)
+        continue
+      }
 
       if (p.id === carrierId && !p.dribbleDir) {
         // Topu akışta kontrol: alıcı ani durmaz, momentumuyla yavaşlayarak
@@ -1378,6 +1430,8 @@ class MatchSim {
       if (p.id === carrierId) {
         target = add(p.pos, scale(p.dribbleDir as Vec2, 6))
         sprint = true
+        // Vur-kaç ritmi: topa vururken yavaşlar, top öndeyken hızlanır
+        dribblePhase = ((this.tick - p.dribbleTouchTick) % 7) / 7
       } else if (ov) {
         target = ov.target
         sprint = ov.sprint
@@ -1414,11 +1468,14 @@ class MatchSim {
       // Enerji tasarrufu: pozisyon tutarken tempolu yürüyüş/hafif koşu;
       // yalnız hedefinden iyice kopan oyuncu tam koşar
       const far = !sprint && dist(p.pos, target) > 10
+      // Vur-kaç: vuruş anında (phase 0) yavaş, topu kovalarken hızlı
+      const carrierFactor =
+        p.id === carrierId ? (dribblePhase >= 0 ? 0.68 + 0.26 * dribblePhase : 0.79) : 1
       const spd =
         maxSpeed(p.info.attributes) *
         energyFactor(p.energy) *
         (sprint || far ? 1 : 0.7) *
-        (p.id === carrierId ? 0.79 : 1)
+        carrierFactor
       const moved = this.movePlayer(p, target, spd, dt, sprint ? 14 : 6)
 
       p.energy = Math.max(0.35, p.energy - moved * drainPerMeter(p.info.attributes))
@@ -1448,6 +1505,7 @@ class MatchSim {
     f[o + F_POSS_HOME] = this.possTicks[0]
     f[o + F_POSS_AWAY] = this.possTicks[1]
     f[o + F_BALL_H] = this.ballHeight()
+    f[o + F_DOWN] = this.tick < this.downedUntil ? this.downedId : -1
     for (let i = 0; i < 22; i++) {
       f[o + F_PLAYERS + i * 2] = this.players[i].pos.x
       f[o + F_PLAYERS + i * 2 + 1] = this.players[i].pos.y

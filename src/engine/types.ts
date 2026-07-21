@@ -91,6 +91,7 @@ export interface PlayerSim {
   sentOff: boolean
   yellows: number
   dribbleDir: Vec2 | null // topu taşırken seçilen yön
+  dribbleTouchTick: number // vur-kaç ritmi için son dokunuş referansı
 }
 
 export type MatchEventKind =
