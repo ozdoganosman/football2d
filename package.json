@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "sim": "tsx src/headless/sim.ts"
+    "sim": "tsx src/headless/sim.ts",
+    "pack": "vite build && node scripts/pack.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
