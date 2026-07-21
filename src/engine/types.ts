@@ -113,6 +113,7 @@ export type MatchEventKind =
   | 'goal_kick'
   | 'free_kick'
   | 'offside'
+  | 'miscontrol'
   | 'half_end'
   | 'full_time'
 

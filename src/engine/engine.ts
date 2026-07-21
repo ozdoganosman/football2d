@@ -23,6 +23,7 @@ import {
   TICKS_PER_SEC,
 } from './constants'
 import {
+  controlSkill,
   drainPerMeter,
   dribbleSkill,
   energyFactor,
@@ -233,6 +234,35 @@ class MatchSim {
 
   looseBall(pos: Vec2, velDir: Vec2, speed: number): void {
     this.ball = { kind: 'loose', pos: { ...pos }, vel: scale(norm(velDir), speed) }
+  }
+
+  // İlk dokunuş: top teslim alınırken kontrol testi. Sert pas, havadan gelen
+  // top ve baskı zorlaştırır; kötü dokunuşta top açılır (kusursuz kontrol yok).
+  receiveBall(playerId: number, difficulty: number): void {
+    const p = this.players[playerId]
+    if (p.info.role === 'GK') {
+      this.possess(playerId) // kaleci topu elleriyle alır
+      return
+    }
+    const ctl = controlSkill(p.info.attributes)
+    const cleanP = Math.max(
+      0.4,
+      Math.min(0.97, 0.95 - difficulty * 0.6 + (ctl - 0.65) * 0.45),
+    )
+    if (this.rng.chance(cleanP)) {
+      this.possess(playerId)
+      return
+    }
+    // Kötü ilk dokunuş: top ayaktan açılır, kapışma doğar
+    this.lastTouchTeam = p.teamIdx
+    this.lastTouchId = playerId
+    const heavy = this.rng.chance(0.75)
+    const dir = norm({
+      x: this.attackDir[p.teamIdx] * this.rng.range(0.2, 1) + this.rng.range(-0.6, 0.6),
+      y: this.rng.range(-1, 1),
+    })
+    this.looseBall(p.pos, dir, heavy ? this.rng.range(2.5, 4.5) : this.rng.range(4.5, 7))
+    if (!heavy) this.pushEvent('miscontrol', p.teamIdx, playerId)
   }
 
   // Atalet ile hareket: istenen hız vektörüne yumuşak geçiş yapılır,
@@ -816,6 +846,10 @@ class MatchSim {
     const { to, targetId, byId } = this.ball
     const by = this.players[byId]
 
+    // İlk dokunuş zorluğu: pasın hızı, havadan gelişi ve alıcıdaki baskı
+    const flightSpeed = dist(this.ball.from, this.ball.to) / Math.max(0.1, this.ball.duration)
+    const lofted = (this.ball.hMax ?? 0) > 0
+
     // Varış noktasına en yakın hücumcu (tercihen hedef oyuncu) ve savunmacı
     let att: PlayerSim | null = null
     let attD = 99
@@ -851,27 +885,30 @@ class MatchSim {
     const attClose = att !== null && attD < 2.2
     const defClose = def !== null && defD < 2.7
 
+    const baseDifficulty =
+      Math.max(0, (flightSpeed - 13) * 0.04) + (lofted ? 0.3 : 0) + (defClose ? 0.25 : 0)
+
     if (attClose && defClose && att && def) {
       // Çekişmeli varış: yakınlık + pozisyon alma becerisi
       const wa = (2.2 - attD) * interceptSkill(att.info.attributes)
       const wd = (2.7 - defD) * interceptSkill(def.info.attributes) * 0.55
       if (this.rng.next() < wa / (wa + wd)) {
-        this.possess(att.id)
+        this.receiveBall(att.id, baseDifficulty)
         this.passesCompleted[by.teamIdx]++
       } else {
-        this.possess(def.id)
         this.pushEvent('interception', def.teamIdx, def.id)
+        this.receiveBall(def.id, baseDifficulty + 0.2)
       }
       return
     }
     if (attClose && att) {
-      this.possess(att.id)
+      this.receiveBall(att.id, baseDifficulty)
       this.passesCompleted[by.teamIdx]++
       return
     }
     if (defClose && def) {
-      this.possess(def.id)
       this.pushEvent('interception', def.teamIdx, def.id)
+      this.receiveBall(def.id, baseDifficulty + 0.2)
       return
     }
     const flightDir = norm(sub(to, this.ball.from))
@@ -987,6 +1024,15 @@ class MatchSim {
     // rastgele, yön hafifçe kıvrılır (yılankavi, organik sürüş).
     // Ara sıra top fazla açılır (ağır dokunuş).
     if (carrier.dribbleDir && this.tick - carrier.dribbleTouchTick >= carrier.dribblePeriod) {
+      // Ağır dokunuş: top GERÇEKTEN açılır (boşa çıkar) — taşıyıcı kovalar,
+      // yakındaki savunmacı araya girebilir. Kontrolü kötü oyuncuda daha sık.
+      const heavyP = 0.16 * (1.5 - controlSkill(carrier.info.attributes))
+      if (this.rng.chance(heavyP)) {
+        this.lastTouchTeam = carrier.teamIdx
+        this.lastTouchId = carrier.id
+        this.looseBall(this.ballPos(), carrier.dribbleDir, this.rng.range(4, 6.5))
+        return
+      }
       carrier.dribbleTouchTick = this.tick
       carrier.dribblePeriod = this.rng.chance(0.12) ? this.rng.int(9, 12) : this.rng.int(5, 9)
       const ang = this.rng.range(-0.35, 0.35)
@@ -1169,8 +1215,8 @@ class MatchSim {
       const passingTeam = this.players[b.byId].teamIdx
       for (const o of this.active(1 - passingTeam)) {
         if (dist(o.pos, pos) < 0.8 && this.rng.chance(0.08 * interceptSkill(o.info.attributes))) {
-          this.possess(o.id)
           this.pushEvent('interception', o.teamIdx, o.id)
+          this.receiveBall(o.id, 0.45) // uçan topu kesmek zor kontrol edilir
           return
         }
       }
@@ -1205,10 +1251,14 @@ class MatchSim {
       return
     }
 
-    // Kapma: 0.9 m içindeki oyuncular arasında pozisyon alma ağırlıklı kura
+    // Kapma: 0.9 m içindeki oyuncular arasında pozisyon alma ağırlıklı kura.
+    // Hızlı yuvarlanan topu durdurmak da kontrol ister (yavaş top temiz alınır).
+    const ballSpeed = Math.hypot(b.vel.x, b.vel.y)
+    const pickupDifficulty =
+      ballSpeed < 2.5 ? 0 : (ballSpeed - 2.5) * 0.1
     const contenders = this.active().filter((p) => dist(p.pos, b.pos) < 0.9)
     if (contenders.length === 1) {
-      this.possess(contenders[0].id)
+      this.receiveBall(contenders[0].id, pickupDifficulty)
     } else if (contenders.length > 1) {
       let total = 0
       const weights = contenders.map((p) => {
@@ -1220,7 +1270,7 @@ class MatchSim {
       for (let i = 0; i < contenders.length; i++) {
         roll -= weights[i]
         if (roll <= 0) {
-          this.possess(contenders[i].id)
+          this.receiveBall(contenders[i].id, pickupDifficulty + 0.2)
           break
         }
       }

@@ -68,6 +68,8 @@ export function commentaryFor(e: MatchEvent, teams: [TeamInfo, TeamInfo]): strin
       return `Serbest vuruşu ${TN} kullanacak`
     case 'offside':
       return pick([`${P} ofsayt bayrağına takıldı`, `Yan hakem bayrağı kaldırdı: ${P} ofsaytta`])
+    case 'miscontrol':
+      return pick([`${P} topu kontrol edemedi!`, `${P}'un ilk dokunuşu kötü, top açıldı`])
     case 'half_end':
       return `İlk yarı sona erdi: ${teams[0].shortName} ${e.scoreHome}-${e.scoreAway} ${teams[1].shortName}`
     case 'full_time':

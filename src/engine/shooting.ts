@@ -14,7 +14,7 @@ export function resolveShot(quality: number, keeper: PlayerSim | null, rng: Rng)
   if (rng.chance(offTargetP)) return { kind: 'missed' }
 
   const g = keeper && !keeper.sentOff ? gkSkill(keeper.info.attributes) : 0.15
-  const goalP = Math.min(0.9, Math.max(0.05, quality * (1.5 - g)))
+  const goalP = Math.min(0.9, Math.max(0.05, quality * (1.32 - g)))
   if (rng.chance(goalP)) return { kind: 'goal' }
 
   // Kurtarış: çoğunlukla kalecide kalır, bazen korner ya da öne çelme

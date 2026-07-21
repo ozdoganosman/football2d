@@ -18,6 +18,10 @@ export const shootSkill = (a: PlayerAttributes): number => 0.35 + (a.shooting / 
 // Top sürme becerisi 0..1 (müdahaleye direnç)
 export const dribbleSkill = (a: PlayerAttributes): number => 0.3 + (a.dribbling / 20) * 0.7
 
+// İlk dokunuş / top kontrolü 0..1 (top sürme + pas karışımı)
+export const controlSkill = (a: PlayerAttributes): number =>
+  0.35 + ((a.dribbling + a.passing) / 2 / 20) * 0.65
+
 // Müdahale becerisi 0..1
 export const tackleSkill = (a: PlayerAttributes): number => 0.3 + (a.tackling / 20) * 0.7
 
