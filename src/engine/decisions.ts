@@ -13,7 +13,7 @@ export type Decision =
   | { kind: 'pass'; targetId: number; score: number }
   | { kind: 'cross'; targetId: number; score: number }
   | { kind: 'shoot'; quality: number; score: number }
-  | { kind: 'dribble'; dir: Vec2; score: number }
+  | { kind: 'dribble'; dir: Vec2; score: number; takeOn?: boolean }
   | { kind: 'clear'; score: number }
 
 // Hücum koordinatında pozisyon değeri: rakip kaleye ve merkeze yaklaştıkça artar,
@@ -63,9 +63,14 @@ export function decide(
   const options: Decision[] = []
 
   let nearestOppDist = 99
+  let nearestOpp: PlayerSim | null = null
   for (const o of opponents) {
     if (o.sentOff) continue
-    nearestOppDist = Math.min(nearestOppDist, dist(o.pos, carrier.pos))
+    const d = dist(o.pos, carrier.pos)
+    if (d < nearestOppDist) {
+      nearestOppDist = d
+      nearestOpp = o
+    }
   }
   const pressure = Math.max(0, 1 - nearestOppDist / 6) // 0 rahat, 1 üstünde adam var
 
@@ -166,6 +171,21 @@ export function decide(
     (counter ? 0.08 : 0) -
     pressure * 0.42
   options.push({ kind: 'dribble', dir: goalDir, score: dribbleScore })
+
+  // Çalım (take-on): üstünde adam varken iyi top sürücü rakibin yanından
+  // kesip onu geçmeyi dener — kendi ceza sahası önünde denemez
+  if (nearestOpp && pressure > 0.35 && att.x > -HALF_LENGTH / 3) {
+    const toOpp = sub(nearestOpp.pos, carrier.pos)
+    // Rakibin hangi yanı boşsa oradan: goalDir x toOpp çapraz çarpım işareti
+    const side = goalDir.x * toOpp.y - goalDir.y * toOpp.x > 0 ? -1 : 1
+    const takeOnDir = norm({
+      x: goalDir.x - goalDir.y * 1.1 * side,
+      y: goalDir.y + goalDir.x * 1.1 * side,
+    })
+    const skill = dribbleSkill(carrier.info.attributes)
+    const takeOnScore = 0.02 + 0.46 * skill + (counter ? 0.06 : 0) - pressure * 0.08
+    options.push({ kind: 'dribble', dir: takeOnDir, score: takeOnScore, takeOn: true })
+  }
 
   // Degaj: kendi üçte birlik alanında baskı altında
   if (att.x < -HALF_LENGTH / 3) {

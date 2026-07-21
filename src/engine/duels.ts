@@ -21,7 +21,7 @@ export function attemptTackle(
     // Temas var; topu sürene karşı müdahale gerçek bir tehdit olmalı
     if (!rng.chance(0.18)) continue
 
-    if (rng.chance(0.035)) return { kind: 'foul', tacklerId: def.id }
+    if (rng.chance(0.025)) return { kind: 'foul', tacklerId: def.id }
 
     const t = tackleSkill(def.info.attributes)
     const d = dribbleSkill(carrier.info.attributes)

@@ -23,12 +23,14 @@ import {
 } from './constants'
 import {
   drainPerMeter,
+  dribbleSkill,
   energyFactor,
   interceptSkill,
   maxSpeed,
   passErrorRate,
   passSpeed,
   shootSkill,
+  tackleSkill,
 } from './attributes'
 import { FORMATIONS } from './formations'
 import { createRng, type Rng } from './rng'
@@ -184,6 +186,8 @@ class MatchSim {
     this.lastTouchTeam = p.teamIdx
     this.lastTouchId = playerId
     p.dribbleDir = null
+    // İlk dokunuş momentumun bir kısmını öldürür (süzülme sınırlı kalır)
+    p.vel = scale(p.vel, 0.45)
     // Kontrol dokunuşu: top alındıktan sonra karar için kısa süre geçer;
     // bu süre savunmanın baskı kurmasına imkân verir
     this.nextDecisionTick = this.tick + (p.info.role === 'GK' ? 12 : 9)
@@ -948,6 +952,47 @@ class MatchSim {
         x: decision.dir.x + this.rng.range(-0.25, 0.25),
         y: decision.dir.y + this.rng.range(-0.35, 0.35),
       })
+
+      // Çalım: en yakın rakiple anlık birebir kontesti — kazanırsa adam
+      // ekarte olur, kaybederse top gider (bedava geçiş yok)
+      if (decision.kind === 'dribble' && decision.takeOn) {
+        let opp: PlayerSim | null = null
+        let od = 3
+        for (const o of opponents) {
+          const dd = dist(o.pos, carrier.pos)
+          if (dd < od) {
+            od = dd
+            opp = o
+          }
+        }
+        if (opp) {
+          const drb = dribbleSkill(carrier.info.attributes)
+          const tck = tackleSkill(opp.info.attributes)
+          const pWin = Math.max(0.25, Math.min(0.7, 0.5 + (drb - tck) * 0.6))
+          if (this.rng.chance(pWin)) {
+            opp.tackleCooldown = Math.max(opp.tackleCooldown, 1.3) // ekarte
+          } else if (this.rng.chance(0.08)) {
+            this.handleFoul(opp.id, carrier.id) // çalım faul kazandırdı
+            return
+          } else {
+            opp.tackleCooldown = Math.max(opp.tackleCooldown, 0.5)
+            this.pushEvent('tackle', opp.teamIdx, opp.id, carrier.id)
+            if (this.rng.chance(0.5)) {
+              this.possess(opp.id)
+            } else {
+              this.looseBall(
+                carrier.pos,
+                { x: this.rng.range(-1, 1), y: this.rng.range(-1, 1) },
+                this.rng.range(2, 5),
+              )
+              this.lastTouchTeam = opp.teamIdx
+              this.lastTouchId = opp.id
+            }
+            return
+          }
+        }
+      }
+
       carrier.dribbleDir = noisy
       this.nextDecisionTick = this.tick + 11
     }
@@ -1099,6 +1144,7 @@ class MatchSim {
   separation(p: PlayerSim): Vec2 {
     let sx = 0
     let sy = 0
+    // Takım arkadaşları: 2 m mesafe korunur
     for (const q of this.active(p.teamIdx)) {
       if (q.id === p.id) continue
       const d = dist(p.pos, q.pos)
@@ -1106,6 +1152,20 @@ class MatchSim {
         const push = (2 - d) * 1.3
         sx += ((p.pos.x - q.pos.x) / d) * push
         sy += ((p.pos.y - q.pos.y) / d) * push
+      }
+    }
+    // Rakipler: görevli (müdahale için temas gerekir) ve topu taşıyan hariç,
+    // ~1.2 m mesafe korunur — çekişme anlarında üst üste binme olmaz
+    if (p.id !== this.engagerId[p.teamIdx]) {
+      const carrierId = this.ball.kind === 'possessed' ? this.ball.playerId : -1
+      for (const q of this.active(1 - p.teamIdx)) {
+        if (q.id === carrierId) continue
+        const d = dist(p.pos, q.pos)
+        if (d < 1.2 && d > 1e-6) {
+          const push = (1.2 - d) * 0.9
+          sx += ((p.pos.x - q.pos.x) / d) * push
+          sy += ((p.pos.y - q.pos.y) / d) * push
+        }
       }
     }
     const l = Math.hypot(sx, sy)
@@ -1227,7 +1287,14 @@ class MatchSim {
             tracker = q
           }
         }
-        if (tracker) overrides.set(tracker.id, { target: b.to, sprint: true })
+        if (tracker) {
+          // Görevliyle aynı noktaya yığılmasın: yakınsa kale tarafına açılır
+          const peel =
+            engager >= 0 && dist(tracker.pos, this.players[engager].pos) < 3
+              ? this.fromAttack({ x: -2.2, y: 0 }, defTeam)
+              : vec(0, 0)
+          overrides.set(tracker.id, { target: add(b.to, peel), sprint: true })
+        }
       }
       // Degaj/uzun top (hedefsiz): hücum eden taraftan da tek oyuncu gider
       if (b.targetId === null) {
@@ -1300,14 +1367,17 @@ class MatchSim {
       let sprint = false
       const ov = overrides.get(p.id)
 
+      if (p.id === carrierId && !p.dribbleDir) {
+        // Topu akışta kontrol: alıcı ani durmaz, momentumuyla yavaşlayarak
+        // süzülür (her pasta duraksama hissi kalkar)
+        p.vel = scale(p.vel, Math.max(0, 1 - 2.8 * dt))
+        p.pos = add(p.pos, scale(p.vel, dt))
+        continue
+      }
+
       if (p.id === carrierId) {
-        if (p.dribbleDir) {
-          target = add(p.pos, scale(p.dribbleDir, 6))
-          sprint = true
-        } else {
-          // Karar anında top ayağında durur; atalet ani duruşu yumuşatır
-          target = p.pos
-        }
+        target = add(p.pos, scale(p.dribbleDir as Vec2, 6))
+        sprint = true
       } else if (ov) {
         target = ov.target
         sprint = ov.sprint
