@@ -387,17 +387,34 @@ class MatchSim {
           if (aDown) {
             b.pos.x += ux * overlap
             b.pos.y += uy * overlap
+            this.killClosingVel(b, -ux, -uy)
           } else if (bDown) {
             a.pos.x -= ux * overlap
             a.pos.y -= uy * overlap
+            this.killClosingVel(a, ux, uy)
           } else {
             a.pos.x -= ux * (overlap / 2)
             a.pos.y -= uy * (overlap / 2)
             b.pos.x += ux * (overlap / 2)
             b.pos.y += uy * (overlap / 2)
+            this.killClosingVel(a, ux, uy)
+            this.killClosingVel(b, -ux, -uy)
           }
         }
       }
+    }
+  }
+
+  // Çarpışma normali yönündeki "içe" hız bileşenini söndürür: pozisyon
+  // düzeltmesi hızı değiştirmezse oyuncu bir sonraki tick'te aynı yöne
+  // tekrar itilmiş olur ve düzeltme her tick tekrarlanır (tık tık
+  // kekemelik). Teğetsel (yanal) hız korunur — ikili mücadelede oyuncular
+  // hâlâ birbirinin etrafında akışkan şekilde kayabilir.
+  private killClosingVel(p: PlayerSim, towardNx: number, towardNy: number): void {
+    const closing = p.vel.x * towardNx + p.vel.y * towardNy
+    if (closing > 0) {
+      p.vel.x -= closing * towardNx
+      p.vel.y -= closing * towardNy
     }
   }
 
@@ -1479,8 +1496,11 @@ class MatchSim {
         const e = this.players[engager]
         const d = dist(e.pos, carrier.pos)
         if (aggressive) {
-          const t =
-            d > 2.5 ? add(carrier.pos, this.fromAttack({ x: -1.5, y: 0 }, defTeam)) : carrier.pos
+          // Çarpışma tabanı 2.0 m: hedef bu sınırın içine düşerse görevli
+          // asla tam varamaz — her tick sert çarpışmayla geri itilir (tık
+          // tık kekemelik). Hedef her zaman tabanın hemen dışında, kale
+          // tarafı öncelikli (jokey mesafesi).
+          const t = add(carrier.pos, this.fromAttack({ x: -2.2, y: 0 }, defTeam))
           overrides.set(engager, { target: t, sprint: true })
         } else {
           // top ile kendi kalesi arasında pozisyon alıp bekler; forvetse
@@ -1506,7 +1526,12 @@ class MatchSim {
         }
         if (second) {
           if (inOwnBox) {
-            overrides.set(second.id, { target: carrier.pos, sprint: true })
+            // Aynı nedenle: tam üstüne değil, çarpışma tabanının dışına
+            // (hafif yanal ofsetle, görevliyle aynı noktaya yığılmasın)
+            overrides.set(second.id, {
+              target: add(carrier.pos, this.fromAttack({ x: -2.2, y: 1.2 }, defTeam)),
+              sprint: true,
+            })
           } else {
             // Kademe: ikinci adam top ile KENDİ KALESİ arasındaki hat üzerinde,
             // görevlinin ~5.5 m gerisinde açıyla durur — görevli geçilirse
@@ -1544,7 +1569,8 @@ class MatchSim {
           }
           if (stopper) {
             overrides.set(stopper.id, {
-              target: add(carrier.pos, scale(norm(sub(ownGoalPos, carrier.pos)), 1.6)),
+              // 1.6 m çarpışma tabanının (2.0 m) içindeydi — dışına çıkar
+              target: add(carrier.pos, scale(norm(sub(ownGoalPos, carrier.pos)), 2.2)),
               sprint: true,
             })
           }
@@ -1793,7 +1819,15 @@ class MatchSim {
           // tarafında dur (top ayağına gelmesin)
           const toBall = norm(sub(bp, best.pos))
           const goalSide = this.fromAttack({ x: -0.8, y: 0 }, defTeam)
-          let mt = add(add(best.pos, scale(toBall, 1.2)), goalSide)
+          let off = add(scale(toBall, 1.2), goalSide)
+          // Çarpışma tabanı 2.0 m: bileşke ofset bunun altına düşerse
+          // markajcı hedefe hiç varamaz (tık tık kekemelik) — tabanın
+          // hemen dışına çek, yön aynı kalsın
+          const offLen = Math.hypot(off.x, off.y)
+          if (offLen < 2.2) {
+            off = offLen < 1e-6 ? scale(toBall, 2.2) : scale(off, 2.2 / offLen)
+          }
+          let mt = add(best.pos, off)
           if (dist(mt, zonal) > 8) {
             mt = add(zonal, scale(norm(sub(mt, zonal)), 8))
           }
