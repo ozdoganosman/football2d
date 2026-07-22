@@ -47,7 +47,7 @@ export type BallState =
   // Yerdeki top HER ZAMAN fizikseldir: konum + hız + sürtünme.
   // controllerId topu "kullanan" oyuncudur (-1 = boşta); top sürme, topa
   // gerçek vuruşlar yapıp kovalamaktır — top oyuncuya bağlı değildir.
-  | { kind: 'rolling'; pos: Vec2; vel: Vec2; controllerId: number }
+  | { kind: 'rolling'; pos: Vec2; vel: Vec2; controllerId: number; curl?: number }
   | {
       kind: 'inFlight'
       from: Vec2

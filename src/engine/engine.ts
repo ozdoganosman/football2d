@@ -72,6 +72,8 @@ class MatchSim {
   downedId = -1 // faulle yerde kalan oyuncu
   downedUntil = -1
   freezeUntil = -1 // düdük sonrası herkesin durduğu an
+  // Yerden pas niyeti: top fiziksel yuvarlanırken kim kime oynadı
+  passIntent: { byId: number; targetId: number; team: number; offside: boolean } | null = null
   half: 1 | 2 = 1
   halfClock = 0
   stoppage = 0
@@ -201,6 +203,28 @@ class MatchSim {
     const pos = at ?? (this.ball.kind === 'rolling' ? this.ball.pos : this.ballPos())
     this.ball = { kind: 'rolling', pos: { ...pos }, vel: vec(0, 0), controllerId: playerId }
     const p = this.players[playerId]
+
+    // Pas niyeti çözümü: ilk kontrol anı
+    const pi = this.passIntent
+    if (pi) {
+      this.passIntent = null
+      if (p.teamIdx === pi.team) {
+        if (pi.offside) {
+          // Ofsayt düdüğü topa dokunma anında (gerçek kural)
+          this.offsides[pi.team]++
+          this.pushEvent('offside', pi.team, playerId)
+          const spot = {
+            x: Math.max(-HALF_LENGTH + 2, Math.min(HALF_LENGTH - 2, pos.x)),
+            y: Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, pos.y)),
+          }
+          this.setupRestart('free_kick', 1 - pi.team, spot, 20)
+          return
+        }
+        this.passesCompleted[pi.team]++
+      } else if (playerId !== pi.byId) {
+        this.pushEvent('interception', p.teamIdx, playerId)
+      }
+    }
     if (p.teamIdx !== this.lastTouchTeam) {
       this.lastTurnover = { tick: this.tick, team: p.teamIdx }
     }
@@ -357,6 +381,7 @@ class MatchSim {
   setupRestart(kind: RestartKind, forTeam: number, spot: Vec2, timer: number): void {
     const takerId = this.pickTaker(kind, forTeam, spot)
     this.engagerId = [-1, -1]
+    this.passIntent = null
     this.phase = { kind: 'restart', restart: kind, forTeam, spot: { ...spot }, timer, takerId }
     this.lastTouchTeam = forTeam
     this.lastTouchId = takerId
@@ -537,6 +562,30 @@ class MatchSim {
     const d = Math.max(1, dist(from, target))
     // Uzun paslar ve ortalar havadan gider (bloğun üstünden aşar)
     const lofted = flight === 'cross' || d0 > 24
+
+    if (!lofted) {
+      // YERDEN PAS = topa gerçek vuruş. Top fiziksel yuvarlanır: yol boyu
+      // yavaşlar, hafif falso yayı çizer; araya girme saf geometridir.
+      const dir = norm(sub(target, from))
+      const vArr = 5.5 + d * 0.08 // hedefte kalmasını istediğimiz hız
+      let firmness = this.rng.range(0.9, 1.12)
+      if (passerPressure < 3) firmness += 0.1 // baskıda fazla vurma eğilimi
+      const v0 = Math.sqrt(vArr * vArr + 2 * 1.5 * d) * firmness
+      this.ball = {
+        kind: 'rolling',
+        pos: { ...from },
+        vel: scale(dir, v0),
+        controllerId: -1,
+        curl: this.rng.range(-0.3, 0.3),
+      }
+      this.passIntent = { byId, targetId, team: by.teamIdx, offside }
+      this.lastTouchTeam = by.teamIdx
+      this.lastTouchId = byId
+      this.passesAttempted[by.teamIdx]++
+      this.pushEvent('pass', by.teamIdx, byId, targetId)
+      return
+    }
+
     this.ball = {
       kind: 'inFlight',
       from,
@@ -548,8 +597,11 @@ class MatchSim {
       byId,
       targetId,
       offside,
-      hMax: lofted ? Math.min(7, 2 + d * 0.08) : 0,
+      hMax: Math.min(7, 2 + d * 0.08),
     }
+    // Havadan pasta da niyet tutulur (iniş sonrası kovalama + tamamlama
+    // sayacı); ofsayt düdüğü havadan pasta varış anında çalınır
+    this.passIntent = { byId, targetId, team: by.teamIdx, offside: false }
     this.lastTouchTeam = by.teamIdx
     this.lastTouchId = byId
     this.passesAttempted[by.teamIdx]++
@@ -871,76 +923,11 @@ class MatchSim {
 
   resolvePassArrival(): void {
     if (this.ball.kind !== 'inFlight') return
-    const { to, targetId, byId } = this.ball
-    const by = this.players[byId]
-
-    // İlk dokunuş zorluğu: pasın hızı, havadan gelişi ve alıcıdaki baskı
-    const flightSpeed = dist(this.ball.from, this.ball.to) / Math.max(0.1, this.ball.duration)
-    const lofted = (this.ball.hMax ?? 0) > 0
-
-    // Varış noktasına en yakın hücumcu (tercihen hedef oyuncu) ve savunmacı
-    let att: PlayerSim | null = null
-    let attD = 99
-    let def: PlayerSim | null = null
-    let defD = 99
-    for (const p of this.active()) {
-      const d = dist(p.pos, to)
-      if (p.teamIdx === by.teamIdx) {
-        if (d < attD) {
-          attD = d
-          att = p
-        }
-      } else if (d < defD) {
-        defD = d
-        def = p
-      }
-    }
-    if (targetId !== null && !this.players[targetId].sentOff) {
-      const recv = this.players[targetId]
-      const d = dist(recv.pos, to)
-      if (d < attD + 0.8) {
-        att = recv
-        attD = d
-      }
-    }
-
-    // Dar varış yarıçapı: uzak kalan yetişemez, top kısa süre boşa düşer ve
-    // doğal bir kapışma çıkar (ışınlanma yok). Markajcılar adamlarının 1.4 m
-    // dibinde durduğu için varışlara doğal olarak ortak olurlar.
-    // Çarpışma tabanı 2.0 m: savunmacı alıcının dibine giremez, bu yüzden
-    // çekişme yarıçapı daha geniş tutulur ama alıcı avantajlıdır (top ona
-    // doğru oynanmıştır)
-    const attClose = att !== null && attD < 2.2
-    const defClose = def !== null && defD < 2.7
-
-    const baseDifficulty =
-      Math.max(0, (flightSpeed - 13) * 0.04) + (lofted ? 0.3 : 0) + (defClose ? 0.25 : 0)
-
-    if (attClose && defClose && att && def) {
-      // Çekişmeli varış: yakınlık + pozisyon alma becerisi
-      const wa = (2.2 - attD) * interceptSkill(att.info.attributes)
-      const wd = (2.7 - defD) * interceptSkill(def.info.attributes) * 0.55
-      if (this.rng.next() < wa / (wa + wd)) {
-        this.receiveBall(att.id, baseDifficulty)
-        this.passesCompleted[by.teamIdx]++
-      } else {
-        this.pushEvent('interception', def.teamIdx, def.id)
-        this.receiveBall(def.id, baseDifficulty + 0.2)
-      }
-      return
-    }
-    if (attClose && att) {
-      this.receiveBall(att.id, baseDifficulty)
-      this.passesCompleted[by.teamIdx]++
-      return
-    }
-    if (defClose && def) {
-      this.pushEvent('interception', def.teamIdx, def.id)
-      this.receiveBall(def.id, baseDifficulty + 0.2)
-      return
-    }
-    const flightDir = norm(sub(to, this.ball.from))
-    this.looseBall(to, flightDir, 2.5)
+    const { to, from } = this.ball
+    // Havadan gelen top yere iner ve sekerek yuvarlanır; kontrol tamamen
+    // yerdeki kapma sistemine kalır (alıcı passIntent ile kovalamaya devam
+    // eder, tamamlanma ilk kontrol anında sayılır)
+    this.looseBall(to, norm(sub(to, from)), this.rng.range(3.5, 5.5))
   }
 
   // --- tick ---
@@ -1048,9 +1035,30 @@ class MatchSim {
     if (this.ball.kind !== 'rolling') return
     const b = this.ball
 
-    // Fizik: yuvarlanma + çim sürtünmesi
+    // Fizik: yuvarlanma direnci sabit yavaşlamadır (a = 1.5 m/s², çim) —
+    // pas yol boyu doğal biçimde yavaşlar. Falso (curl) hafif yay çizdirir.
     b.pos = add(b.pos, scale(b.vel, dt))
-    b.vel = scale(b.vel, Math.max(0, 1 - 1.7 * dt))
+    const v = Math.hypot(b.vel.x, b.vel.y)
+    if (v > 1e-6) {
+      const v2 = Math.max(0, v - 1.5 * dt)
+      if (v2 < 0.15) {
+        b.vel = vec(0, 0)
+      } else {
+        let nx = b.vel.x / v
+        let ny = b.vel.y / v
+        if (b.curl) {
+          // dik yönde küçük ivme: yön hafifçe döner
+          const turn = (b.curl / Math.max(2, v)) * dt
+          const cos = Math.cos(turn)
+          const sin = Math.sin(turn)
+          const rx = nx * cos - ny * sin
+          const ry = nx * sin + ny * cos
+          nx = rx
+          ny = ry
+        }
+        b.vel = { x: nx * v2, y: ny * v2 }
+      }
+    }
 
     if (Math.abs(b.pos.y) > HALF_WIDTH || Math.abs(b.pos.x) > HALF_LENGTH) {
       this.outOfBounds(b.pos)
@@ -1064,7 +1072,8 @@ class MatchSim {
     // oyuncunun da erişebilmesine izin verir — kura çözer.
     if (b.controllerId < 0) {
       const ballSpeed = Math.hypot(b.vel.x, b.vel.y)
-      const pickupDifficulty = ballSpeed < 2.5 ? 0 : (ballSpeed - 2.5) * 0.1
+      // Yumuşak varış kolay, sıcak gelen pas zor kontrol edilir
+      const pickupDifficulty = ballSpeed < 4 ? 0 : (ballSpeed - 4) * 0.09
       const contenders = this.active().filter((p) => dist(p.pos, b.pos) < 1.3)
       if (contenders.length === 1) {
         this.receiveBall(contenders[0].id, pickupDifficulty)
@@ -1281,7 +1290,6 @@ class MatchSim {
       const passingTeam = this.players[b.byId].teamIdx
       for (const o of this.active(1 - passingTeam)) {
         if (dist(o.pos, pos) < 0.8 && this.rng.chance(0.08 * interceptSkill(o.info.attributes))) {
-          this.pushEvent('interception', o.teamIdx, o.id)
           this.receiveBall(o.id, 0.45) // uçan topu kesmek zor kontrol edilir
           return
         }
@@ -1292,7 +1300,6 @@ class MatchSim {
       const gk = this.keeperOf(1 - this.players[b.byId].teamIdx)
       if (gk && dist(gk.pos, pos) < 2.2 && this.rng.chance(0.4)) {
         this.possess(gk.id)
-        this.pushEvent('interception', gk.teamIdx, gk.id)
         return
       }
     }
@@ -1517,6 +1524,34 @@ class MatchSim {
           att.x < -HALF_LENGTH + PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
         const engager = this.assignEngager(t, chase, 28, inOwnBox)
         if (engager >= 0) overrides.set(engager, { target: chase, sprint: true })
+      }
+
+      // Yerden pas yolda: alıcı topu karşılamaya koşar, alıcının markajcısı
+      // da onunla gider (savunma markaj/şekil düzeni pas boyunca aktif)
+      const pi = this.passIntent
+      if (pi && !this.players[pi.targetId].sentOff) {
+        const pursuit = add(bp, scale(this.ball.vel, 0.45))
+        overrides.set(pi.targetId, { target: pursuit, sprint: true })
+        defTeam = 1 - pi.team
+        const recv = this.players[pi.targetId]
+        let tracker: PlayerSim | null = null
+        let trackerD = 8
+        for (const q of this.active(defTeam)) {
+          if (q.info.role === 'GK' || q.id === this.engagerId[defTeam]) continue
+          const dd = dist(q.pos, recv.pos)
+          if (dd < trackerD) {
+            trackerD = dd
+            tracker = q
+          }
+        }
+        if (tracker) {
+          const eng = this.engagerId[defTeam]
+          const peel =
+            eng >= 0 && dist(tracker.pos, this.players[eng].pos) < 3
+              ? this.fromAttack({ x: -2.2, y: 0 }, defTeam)
+              : vec(0, 0)
+          overrides.set(tracker.id, { target: add(pursuit, peel), sprint: true })
+        }
       }
     }
 
