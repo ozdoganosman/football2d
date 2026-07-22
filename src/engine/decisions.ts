@@ -83,6 +83,13 @@ export function decide(
     .sort((a, b) => b - a)
   const offsideLine = Math.max(oppDepths[1] ?? 0, 0)
 
+  // Rakip orta saha hattı (medyan): bloklar arası cebi tanımlar
+  const oppMFx = opponents
+    .filter((o) => !o.sentOff && o.info.role === 'MF')
+    .map((o) => toAttack(o.pos, attackDir).x)
+    .sort((a, b) => a - b)
+  const mfLine = oppMFx.length ? oppMFx[Math.floor(oppMFx.length / 2)] : offsideLine - 20
+
   // Pas seçenekleri
   for (const m of teammates) {
     if (m === carrier || m.sentOff) continue
@@ -116,6 +123,12 @@ export function decide(
       0.09 +
       (passLen > 26 ? -0.02 * (passLen - 26) : 0) +
       (passLen < 10 ? -0.012 * (10 - passLen) : 0)
+    // Bloklar arası bonus: iki hat arasındaki cepte BOŞTA gösteren adam
+    // değerli bir hedeftir (markajlıysa bonus erir — recvSpace çarpanı)
+    if (mAttX > mfLine + 1.5 && mAttX < offsideLine - 1) score += 0.08 * recvSpace
+    // Ara pası: ofsayt çizgisine yapışıp İLERİ fırlayan adam derin topun
+    // hedefidir — koşu yoluna pas onu hattın arkasına taşır
+    if (mAttX > offsideLine - 3 && runSpeed > 0.5) score += 0.03
     // Kaleci +1 adamdır: defanstan çıkışta geri pas meşru bir seçenek
     if (m.info.role === 'GK') score -= att.x < -15 ? 0.08 : 0.3
     // Baskı altındayken güvenli (açık) pas cazipleşir

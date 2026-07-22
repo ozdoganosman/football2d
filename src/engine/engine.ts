@@ -68,6 +68,22 @@ class MatchSim {
   phase: Phase = { kind: 'open' }
   restartTargets: (Vec2 | null)[] = []
   engagerId: [number, number] = [-1, -1] // takım başına topa giden görevli (histerezis)
+  // Topsuz koşu görevleri: biri bloklar arası cebe iner ('pocket'), diğeri
+  // savunma hattına yapışıp ARKAYA fırlamak için çizgide sürer ('behind');
+  // koşu penceresi ~3.5 sn sürer, sonra tazelenir
+  pocketRun: {
+    team: number
+    ids: [number, number]
+    lanes: [number, number]
+    modes: ['pocket' | 'behind', 'pocket' | 'behind']
+    until: number
+  } = {
+    team: -1,
+    ids: [-1, -1],
+    lanes: [0, 0],
+    modes: ['pocket', 'pocket'],
+    until: 0,
+  }
   lastTurnover = { tick: -999, team: -1 } // kontra penceresi takibi
   downedId = -1 // faulle yerde kalan oyuncu
   downedUntil = -1
@@ -382,6 +398,7 @@ class MatchSim {
     const takerId = this.pickTaker(kind, forTeam, spot)
     this.engagerId = [-1, -1]
     this.passIntent = null
+    this.pocketRun = { team: -1, ids: [-1, -1], lanes: [0, 0], modes: ['pocket', 'pocket'], until: 0 }
     this.phase = { kind: 'restart', restart: kind, forTeam, spot: { ...spot }, timer, takerId }
     this.lastTouchTeam = forTeam
     this.lastTouchId = takerId
@@ -512,6 +529,20 @@ class MatchSim {
     }
     xs.sort((a, b) => b - a)
     return Math.max(xs[1] ?? 0, 0)
+  }
+
+  // Rakip blok hatları (attTeam'in hücum çerçevesinde): savunma hattı =
+  // ofsayt çizgisi, orta saha hattı = rakip MF'lerin medyan derinliği.
+  // pocket = iki blok arasındaki cebin derinliği (m)
+  oppLines(attTeam: number): { mfLine: number; dfLine: number; pocket: number } {
+    const dfLine = this.offsideLine(attTeam)
+    const xs: number[] = []
+    for (const o of this.active(1 - attTeam)) {
+      if (o.info.role === 'MF') xs.push(this.toAttack(o.pos, attTeam).x)
+    }
+    xs.sort((a, b) => a - b)
+    const mfLine = xs.length ? xs[Math.floor(xs.length / 2)] : dfLine - 20
+    return { mfLine, dfLine, pocket: dfLine - mfLine }
   }
 
   // --- uçuş başlatma ---
@@ -1481,6 +1512,59 @@ class MatchSim {
         }
       }
 
+      // TOPSUZ KOŞU SEÇİMİ: bloklar arası cep varsa bir koşucu oraya iner;
+      // savunma hattının arkasında alan varsa bir koşucu da çizgiye yapışıp
+      // ARKAYA fırlamak için derin koşu görevi alır. Kanallar topun iki
+      // yanındaki yarı boşluklardır; pencere boyunca kanal sabit kalır
+      // (koşunun bir yönü olur), pencere dolunca tazelenir.
+      const attTeam = carrier.teamIdx
+      const ballAttA = this.toAttack(bp, attTeam)
+      const lines = this.oppLines(attTeam)
+      const pocketOk = lines.pocket >= 7
+      // Hat kutu önüne çakılmamışsa arkasında koşulacak alan var demektir;
+      // derin koşu topun gerisinden anlamsız — top ilerideyken kurulur
+      const behindOk = HALF_LENGTH - 16.5 - lines.dfLine > 9 && ballAttA.x > -2
+      if ((pocketOk || behindOk) && ballAttA.x > -12 && ballAttA.x < lines.dfLine) {
+        if (this.pocketRun.team !== attTeam || this.tick >= this.pocketRun.until) {
+          const laneY = (side: 1 | -1) =>
+            Math.max(-22, Math.min(22, ballAttA.y * 0.35 + side * 8.5))
+          const laneSpace = (y: number) => {
+            const spot = this.fromAttack({ x: (lines.mfLine + lines.dfLine) / 2, y }, attTeam)
+            let m = 99
+            for (const o of this.active(defTeam)) m = Math.min(m, dist(o.pos, spot))
+            return m
+          }
+          const y1 = laneY(1)
+          const y2 = laneY(-1)
+          const lanes: [number, number] = laneSpace(y1) >= laneSpace(y2) ? [y1, y2] : [y2, y1]
+          // İlk koşucu cebe (varsa), ikincisi defans arkasına (varsa) —
+          // ikisi de varsa hem hat arası hem derinlik aynı anda tehdit edilir
+          const modes: ['pocket' | 'behind', 'pocket' | 'behind'] = [
+            pocketOk ? 'pocket' : 'behind',
+            behindOk ? 'behind' : 'pocket',
+          ]
+          const ids: [number, number] = [-1, -1]
+          const used = new Set<number>()
+          for (let li = 0; li < 2; li++) {
+            const spotX =
+              modes[li] === 'behind' ? lines.dfLine - 0.5 : lines.mfLine + lines.pocket * 0.55
+            const spot = this.fromAttack({ x: spotX, y: lanes[li] }, attTeam)
+            let bestD = 26
+            for (const m of this.active(attTeam)) {
+              if (m.id === carrierId || m.info.role === 'GK' || m.info.role === 'DF') continue
+              if (used.has(m.id) || overrides.has(m.id)) continue
+              const dd = dist(m.pos, spot)
+              if (dd < bestD) {
+                bestD = dd
+                ids[li] = m.id
+              }
+            }
+            if (ids[li] >= 0) used.add(ids[li])
+          }
+          this.pocketRun = { team: attTeam, ids, lanes, modes, until: this.tick + 35 }
+        }
+      }
+
       // Pas açısı desteği: taşıyıcı baskı altındaysa en yakın iki takım
       // arkadaşı kısa pas seçeneği yaratacak açılara iner (boşa çıkma)
       let nearestDef = 99
@@ -1496,7 +1580,13 @@ class MatchSim {
         const s1 = add(back, scale(perp, 9))
         const s2 = add(back, scale(perp, -9))
         const mates = this.active(carrier.teamIdx)
-          .filter((m) => m.id !== carrier.id && m.info.role !== 'GK')
+          .filter(
+            (m) =>
+              m.id !== carrier.id &&
+              m.info.role !== 'GK' &&
+              // cebe koşan oyuncu kısa destek için koşusundan koparılmaz
+              !(this.pocketRun.team === carrier.teamIdx && this.pocketRun.ids.includes(m.id)),
+          )
           .sort((a, b) => dist(a.pos, carrier.pos) - dist(b.pos, carrier.pos))
           .slice(0, 2)
         if (mates[0]) {
@@ -1584,6 +1674,42 @@ class MatchSim {
               ? this.fromAttack({ x: -2.2, y: 0 }, defTeam)
               : vec(0, 0)
           overrides.set(tracker.id, { target: add(pursuit, peel), sprint: true })
+        }
+      }
+    }
+
+    // TOPSUZ KOŞU HEDEFLERİ: cep koşucusu bloklar arasına iner, derin
+    // koşucu savunma hattına yapışıp arkaya fırlamak için çizgide sürer
+    // (çizgi dansı). Pas yoldayken de koşu sürer (topu bekleyerek
+    // durulmaz); hatlar kayınca hedef her tick tazelenir, kanal sabittir.
+    if (this.pocketRun.until > this.tick && this.pocketRun.team >= 0) {
+      const runTeam = this.pocketRun.team
+      if (possTeam === runTeam || possTeam < 0) {
+        const lines = this.oppLines(runTeam)
+        for (let li = 0; li < 2; li++) {
+          const rid = this.pocketRun.ids[li]
+          if (rid < 0 || rid === carrierId || overrides.has(rid)) continue
+          const r = this.players[rid]
+          if (r.sentOff) continue
+          const mode = this.pocketRun.modes[li]
+          let x: number
+          if (mode === 'behind') {
+            // Derin koşu: ofsayt çizgisinin hemen gerisinde kal — ara pası
+            // gelirse koşu yoluna pas onu hattın ARKASINA taşır
+            x = Math.max(lines.dfLine - 0.5, lines.mfLine + 2)
+          } else {
+            if (lines.pocket < 4) continue // cep kapandı, koşuyu zorlamaz
+            const rAttX = this.toAttack(r.pos, runTeam).x
+            // Hattın üstünde bekleyen adam cebe GERİ iner (topa dönük pas
+            // ister), derindeki adam cebe ÇIKAR (hat arasına dalar)
+            const depth =
+              rAttX > lines.dfLine - 1
+                ? lines.mfLine + lines.pocket * 0.4
+                : lines.mfLine + lines.pocket * 0.65
+            x = Math.min(Math.max(depth, lines.mfLine + 1.5), lines.dfLine - 1.5)
+          }
+          const target = this.fromAttack({ x, y: this.pocketRun.lanes[li] }, runTeam)
+          overrides.set(rid, { target, sprint: dist(r.pos, target) > 3 })
         }
       }
     }
