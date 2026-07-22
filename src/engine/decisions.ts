@@ -104,10 +104,14 @@ export function decide(
     const progress = positionValue(toAttack(m.pos, attackDir)) - myValue
 
     const progressW = counter ? 0.58 : 0.42
+    // Koşu yoluna pas: ileri koşan takım arkadaşı değerli bir hedeftir
+    const runSpeed = (m.vel.x * attackDir + Math.abs(m.vel.y) * 0.3) / 7
+    const runBonus = Math.max(0, Math.min(0.14, runSpeed * 0.14))
     let score =
       0.26 * laneOpen +
       0.2 * recvSpace +
-      progressW * (0.55 + progress) -
+      progressW * (0.55 + progress) +
+      runBonus -
       0.09 +
       (passLen > 26 ? -0.02 * (passLen - 26) : 0) +
       (passLen < 10 ? -0.012 * (10 - passLen) : 0)

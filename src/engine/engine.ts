@@ -247,6 +247,24 @@ class MatchSim {
     )
     if (this.rng.chance(cleanP)) {
       this.possess(playerId, spot)
+      // Yönlü ilk dokunuş: top ölü durdurulmaz — gidilecek boş yöne açılır
+      // (hücum yönü + en yakın rakipten uzağa). Sert gelen top daha büyük
+      // açılır; oyuncu topla birlikte hareket etme şansı bulur.
+      if (this.ball.kind === 'rolling' && this.phase.kind === 'open') {
+        const fwd = vec(this.attackDir[p.teamIdx], 0)
+        let esc = vec(0, 0)
+        let nearestOpp = 99
+        for (const o of this.active(1 - p.teamIdx)) {
+          const d = dist(o.pos, p.pos)
+          if (d < nearestOpp) {
+            nearestOpp = d
+            if (d < 7) esc = norm(sub(p.pos, o.pos))
+          }
+        }
+        const touchDir = norm(add(fwd, scale(esc, 0.9)))
+        const touchSpeed = Math.min(3.4, 1.2 + difficulty * 2.2 + this.rng.range(0, 0.6))
+        this.ball.vel = scale(touchDir, touchSpeed)
+      }
       return
     }
     // Kötü ilk dokunuş: top ayaktan sekip açılır, kapışma doğar
@@ -482,8 +500,15 @@ class MatchSim {
     const by = this.players[byId]
     const to = this.players[targetId]
     const from = { ...this.ballPos() }
-    const lead = scale(norm(sub(to.pos, from)), 1.2)
-    const d0 = dist(from, to.pos)
+    // Koşu yoluna pas: hedef, alıcının ayağı değil — mevcut koşusunun uçuş
+    // süresi kadar önü. Koşan adam topu adım aralığında, hız kesmeden alır.
+    const d0raw = dist(from, to.pos)
+    const flightT = d0raw / passSpeed(by.info.attributes)
+    let lead = scale(to.vel, flightT * 0.85)
+    const leadLen = Math.hypot(lead.x, lead.y)
+    if (leadLen > 12) lead = scale(lead, 12 / leadLen)
+    if (leadLen < 1) lead = scale(norm(sub(to.pos, from)), 1.2) // duran adama ayağa
+    const d0 = d0raw
     // Uzun paslarda ve baskı altında hata payı büyür
     let err = passErrorRate(by.info.attributes) * (1 + d0 / 40)
     let passerPressure = 99
