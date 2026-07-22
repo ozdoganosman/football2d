@@ -107,7 +107,7 @@ export function decide(
       laneMin = Math.min(laneMin, distToSegment(o.pos, carrier.pos, m.pos))
       recvMin = Math.min(recvMin, dist(o.pos, m.pos))
     }
-    const laneOpen = Math.min(1, laneMin / 8)
+    const laneOpen = Math.min(1, laneMin / 9)
     const recvSpace = Math.min(1, recvMin / 8)
     const progress = positionValue(toAttack(m.pos, attackDir)) - myValue
 

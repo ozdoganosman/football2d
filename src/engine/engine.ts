@@ -89,7 +89,13 @@ class MatchSim {
   downedUntil = -1
   freezeUntil = -1 // düdük sonrası herkesin durduğu an
   // Yerden pas niyeti: top fiziksel yuvarlanırken kim kime oynadı
-  passIntent: { byId: number; targetId: number; team: number; offside: boolean } | null = null
+  passIntent: {
+    byId: number
+    targetId: number
+    team: number
+    offside: boolean
+    tick: number // vuruş anı: savunmanın pasa tepkisi gecikmeli başlar
+  } | null = null
   half: 1 | 2 = 1
   halfClock = 0
   stoppage = 0
@@ -241,21 +247,32 @@ class MatchSim {
         this.pushEvent('interception', p.teamIdx, playerId)
       }
     }
+    // Kendi sürüşünü yeniden yakalamak (vur-kaç yetişmesi) YENİ kontrol
+    // değildir: fren, yön silme ve karar beklemesi uygulanmaz — bunlar her
+    // yeniden yakalamada tekrarlanınca sürücü dur-kalk yapıyordu (mücadele
+    // sırasında "takılma" görüntüsünün ana kaynağı)
+    const reControl = this.lastTouchId === playerId && this.lastTouchTeam === p.teamIdx
     if (p.teamIdx !== this.lastTouchTeam) {
       this.lastTurnover = { tick: this.tick, team: p.teamIdx }
     }
     this.lastTouchTeam = p.teamIdx
     this.lastTouchId = playerId
-    p.dribbleDir = null
-    // İlk dokunuş momentumun bir kısmını öldürür (süzülme sınırlı kalır)
-    p.vel = scale(p.vel, 0.45)
+    if (!reControl) {
+      p.dribbleDir = null
+      // İlk dokunuş momentumun bir kısmını öldürür (süzülme sınırlı kalır)
+      p.vel = scale(p.vel, 0.45)
+    }
     // Kontrol dokunuşu: top alındıktan sonra karar için kısa süre geçer;
-    // bu süre savunmanın baskı kurmasına imkân verir
-    this.nextDecisionTick = this.tick + (p.info.role === 'GK' ? 12 : 9)
-    // İlk dokunuş koruması: alıcı topu kontrol edecek kadar zaman bulur
-    for (const o of this.active(1 - p.teamIdx)) {
-      if (dist(o.pos, p.pos) < 2.5) {
-        o.tackleCooldown = Math.max(o.tackleCooldown, 0.6)
+    // bu süre savunmanın baskı kurmasına imkân verir. Kendi topunu yeniden
+    // yakalayan sürücü akışını sürdürür (kısa nefes yeter)
+    this.nextDecisionTick = this.tick + (p.info.role === 'GK' ? 12 : reControl ? 3 : 9)
+    // İlk dokunuş koruması: alıcı topu kontrol edecek kadar zaman bulur —
+    // yalnız YENİ kazanılan topta (sürüş yetişmesi rakibe dokunulmazlık vermez)
+    if (!reControl) {
+      for (const o of this.active(1 - p.teamIdx)) {
+        if (dist(o.pos, p.pos) < 2.5) {
+          o.tackleCooldown = Math.max(o.tackleCooldown, 0.6)
+        }
       }
     }
   }
@@ -285,12 +302,16 @@ class MatchSim {
       0.4,
       Math.min(0.985, 0.985 - difficulty * 0.65 + (ctl - 0.65) * 0.45),
     )
+    // Kendi sürüşünü yakalıyor mu? (possess lastTouch'ı değiştirmeden ölç)
+    const reControl = this.lastTouchId === playerId && this.lastTouchTeam === p.teamIdx
     if (this.rng.chance(cleanP)) {
       this.possess(playerId, spot)
       // Yönlü ilk dokunuş: top ölü durdurulmaz — gidilecek boş yöne açılır
       // (hücum yönü + en yakın rakipten uzağa). Sert gelen top daha büyük
-      // açılır; oyuncu topla birlikte hareket etme şansı bulur.
-      if (this.ball.kind === 'rolling' && this.phase.kind === 'open') {
+      // açılır; oyuncu topla birlikte hareket etme şansı bulur. Kendi
+      // sürüşünü yakalayan İSTİSNA: kaçış dokunuşu sürüşü tersine çevirip
+      // mücadelede mekik görüntüsü veriyordu — sürücü akışında devam eder
+      if (!reControl && this.ball.kind === 'rolling' && this.phase.kind === 'open') {
         const fwd = vec(this.attackDir[p.teamIdx], 0)
         let esc = vec(0, 0)
         let nearestOpp = 99
@@ -332,10 +353,19 @@ class MatchSim {
       desired = scale(norm(sub(target, p.pos)), Math.min(eff, d / dt))
     }
     const k = Math.min(1, dt * agility)
-    p.vel = {
-      x: p.vel.x + (desired.x - p.vel.x) * k,
-      y: p.vel.y + (desired.y - p.vel.y) * k,
+    // İVME TAVANI: hız değişimi insan ivmesiyle sınırlıdır (~13 m/s²).
+    // k-karışımı tek başına tam geri dönüşü tek tick'te yapabiliyordu
+    // (Δv≈10 m/s) — mücadelede mekik/takılma görüntüsünün fizik kaynağı.
+    // Tavanla dönüş doğal olur: önce fren, sonra yeni yöne hızlanma.
+    let dvx = (desired.x - p.vel.x) * k
+    let dvy = (desired.y - p.vel.y) * k
+    const dvMag = Math.hypot(dvx, dvy)
+    const maxDv = 13 * dt
+    if (dvMag > maxDv) {
+      dvx *= maxDv / dvMag
+      dvy *= maxDv / dvMag
     }
+    p.vel = { x: p.vel.x + dvx, y: p.vel.y + dvy }
     const before = { ...p.pos }
     p.pos = add(p.pos, scale(p.vel, dt))
     return dist(before, p.pos)
@@ -386,6 +416,25 @@ class MatchSim {
             a.pos.y -= uy * (overlap / 2)
             b.pos.x += ux * (overlap / 2)
             b.pos.y += uy * (overlap / 2)
+          }
+          // Konumla birlikte YAKLAŞMA HIZI da söner (esnemesiz temas):
+          // içeri koşan bileşen kalkar, teğet bileşen kalır — gövdeler
+          // birbirinin etrafından kayar. Bu olmadan movePlayer her tick
+          // hızı içeri kurar, taban dışarı iter: mücadelede titreme olur.
+          const vn = (b.vel.x - a.vel.x) * ux + (b.vel.y - a.vel.y) * uy
+          if (vn < 0) {
+            if (aDown) {
+              b.vel.x -= ux * vn
+              b.vel.y -= uy * vn
+            } else if (bDown) {
+              a.vel.x += ux * vn
+              a.vel.y += uy * vn
+            } else {
+              a.vel.x += ux * (vn / 2)
+              a.vel.y += uy * (vn / 2)
+              b.vel.x -= ux * (vn / 2)
+              b.vel.y -= uy * (vn / 2)
+            }
           }
         }
       }
@@ -531,6 +580,30 @@ class MatchSim {
     return Math.max(xs[1] ?? 0, 0)
   }
 
+  // Yuvarlanan topla buluşma noktası: oyuncunun yetişebileceği EN ERKEN yol
+  // noktası (top sabit 1.5 m/s² yavaşlamayla ilerler; kavis ihmal edilir).
+  // Topun arkasından kovalamak yerine önünü kesmek — alıcı pası böyle alır.
+  meetRollingBall(p: PlayerSim, maxSpd: number): Vec2 {
+    if (this.ball.kind !== 'rolling') return this.ballPos()
+    const b = this.ball
+    const v0 = Math.hypot(b.vel.x, b.vel.y)
+    if (v0 < 0.3) return { ...b.pos }
+    const dir = { x: b.vel.x / v0, y: b.vel.y / v0 }
+    const tStop = v0 / 1.5
+    // Oyuncunun t saniyede kat edebileceği yol: ivme tavanı (13 m/s²)
+    // hesaba katılır — duran oyuncu ilk anda ışınlanamaz
+    const tA = maxSpd / 13
+    const reach = (t: number) => (t < tA ? 6.5 * t * t : maxSpd * (t - tA / 2))
+    for (let t = 0.2; t <= 3; t += 0.2) {
+      const tc = Math.min(t, tStop)
+      const s = v0 * tc - 0.75 * tc * tc
+      const pos = { x: b.pos.x + dir.x * s, y: b.pos.y + dir.y * s }
+      if (dist(p.pos, pos) <= reach(t) + 0.4) return pos
+    }
+    const sEnd = v0 * tStop - 0.75 * tStop * tStop
+    return { x: b.pos.x + dir.x * sEnd, y: b.pos.y + dir.y * sEnd }
+  }
+
   // Rakip blok hatları (attTeam'in hücum çerçevesinde): savunma hattı =
   // ofsayt çizgisi, orta saha hattı = rakip MF'lerin medyan derinliği.
   // pocket = iki blok arasındaki cebin derinliği (m)
@@ -609,7 +682,7 @@ class MatchSim {
         controllerId: -1,
         curl: this.rng.range(-0.3, 0.3),
       }
-      this.passIntent = { byId, targetId, team: by.teamIdx, offside }
+      this.passIntent = { byId, targetId, team: by.teamIdx, offside, tick: this.tick }
       this.lastTouchTeam = by.teamIdx
       this.lastTouchId = byId
       this.passesAttempted[by.teamIdx]++
@@ -632,7 +705,7 @@ class MatchSim {
     }
     // Havadan pasta da niyet tutulur (iniş sonrası kovalama + tamamlama
     // sayacı); ofsayt düdüğü havadan pasta varış anında çalınır
-    this.passIntent = { byId, targetId, team: by.teamIdx, offside: false }
+    this.passIntent = { byId, targetId, team: by.teamIdx, offside: false, tick: this.tick }
     this.lastTouchTeam = by.teamIdx
     this.lastTouchId = byId
     this.passesAttempted[by.teamIdx]++
@@ -1105,7 +1178,18 @@ class MatchSim {
       const ballSpeed = Math.hypot(b.vel.x, b.vel.y)
       // Yumuşak varış kolay, sıcak gelen pas zor kontrol edilir
       const pickupDifficulty = ballSpeed < 4 ? 0 : (ballSpeed - 4) * 0.09
-      const contenders = this.active().filter((p) => dist(p.pos, b.pos) < 1.3)
+      // Aktif oynayan (pasın alıcısı, topa giden görevliler, son dokunan)
+      // tam kapma menziline sahiptir; yol kenarında DİKİLEN oyuncu ancak
+      // bacak uzatabilir (0.8) — pasif dikilme her pası otomatik çalmasın
+      const piNow = this.passIntent
+      const contenders = this.active().filter((p) => {
+        const activeOnBall =
+          (piNow && p.id === piNow.targetId) ||
+          p.id === this.engagerId[0] ||
+          p.id === this.engagerId[1] ||
+          p.id === this.lastTouchId
+        return dist(p.pos, b.pos) < (activeOnBall ? 1.3 : 0.8)
+      })
       if (contenders.length === 1) {
         this.receiveBall(contenders[0].id, pickupDifficulty)
       } else if (contenders.length > 1) {
@@ -1255,10 +1339,17 @@ class MatchSim {
       // VURUŞ: topa gerçek impuls — top öne yuvarlanır, oyuncu kovalar,
       // yetişince tekrar oynar. Ağır dokunuş topu fazla açar (kontrolü
       // kötü oyuncuda daha sık) ve rakip araya girebilir.
-      carrier.dribbleDir = noisy
+      // Yön sürekliliği: ardışık dokunuşlar önceki sürüş yönüyle harmanlanır
+      // (zikzak değil kavis) — çalım kesmesi bilinçli KESKİN kalır
+      const prevDir = carrier.dribbleDir
+      const kickDir =
+        decision.kind === 'dribble' && !decision.takeOn && prevDir
+          ? norm({ x: prevDir.x * 0.55 + noisy.x * 0.45, y: prevDir.y * 0.55 + noisy.y * 0.45 })
+          : noisy
+      carrier.dribbleDir = kickDir
       const heavyP = 0.14 * (1.5 - controlSkill(carrier.info.attributes))
       const kick = this.rng.chance(heavyP) ? this.rng.range(6.5, 8.5) : this.rng.range(4.2, 6)
-      b.vel = scale(noisy, kick)
+      b.vel = scale(kickDir, kick)
       this.lastTouchTeam = carrier.teamIdx
       this.lastTouchId = carrier.id
       this.nextDecisionTick = this.tick + 3
@@ -1440,8 +1531,19 @@ class MatchSim {
         const e = this.players[engager]
         const d = dist(e.pos, carrier.pos)
         if (aggressive) {
-          const t =
-            d > 2.5 ? add(carrier.pos, this.fromAttack({ x: -1.5, y: 0 }, defTeam)) : carrier.pos
+          // Kale tarafı ofseti mesafeyle SÜREKLİ erir (3.5 m'de tam, temas
+          // halkasında sıfır) — sınırda hedef zıplaması mücadele titremesi
+          // yaratıyordu (ikili anahtar 2.5 m'de 1.5 m sıçratırdı)
+          const goalOff = -1.5 * Math.min(1, Math.max(0, (d - 2.0) / 1.5))
+          let t = add(carrier.pos, this.fromAttack({ x: goalOff, y: 0 }, defTeam))
+          // Yakın mesafede hedef taşıyıcının ÜSTÜ değil temas halkasının
+          // üstündeki nokta olur: çarpışma tabanına her tick gömülüp geri
+          // itilme (titreme) biter — müdahale menzili (2.4) yine dolu
+          if (d < 3.2 && d > 1e-6) {
+            const ringT = add(carrier.pos, scale(norm(sub(e.pos, carrier.pos)), 1.95))
+            const w = Math.min(1, (3.2 - d) / 1.2)
+            t = { x: t.x + (ringT.x - t.x) * w, y: t.y + (ringT.y - t.y) * w }
+          }
           overrides.set(engager, { target: t, sprint: true })
         } else {
           // top ile kendi kalesi arasında pozisyon alıp bekler; forvetse
@@ -1467,7 +1569,12 @@ class MatchSim {
         }
         if (second) {
           if (inOwnBox) {
-            overrides.set(second.id, { target: carrier.pos, sprint: true })
+            // Halka üstü yaklaşma noktası: taşıyıcının üstüne değil temas
+            // mesafesine koş (tabana gömülme titremesi olmaz)
+            const toS = dist(second.pos, carrier.pos) > 1e-6
+              ? norm(sub(second.pos, carrier.pos))
+              : vec(1, 0)
+            overrides.set(second.id, { target: add(carrier.pos, scale(toS, 1.95)), sprint: true })
           } else {
             // Kademe: ikinci adam top ile KENDİ KALESİ arasındaki hat üzerinde,
             // görevlinin ~5.5 m gerisinde açıyla durur — görevli geçilirse
@@ -1504,8 +1611,10 @@ class MatchSim {
             }
           }
           if (stopper) {
+            // 2.1 m: temas tabanının (2.0) hemen dışı — içine hedeflenirse
+            // her tick gömül/itil döngüsü titretir
             overrides.set(stopper.id, {
-              target: add(carrier.pos, scale(norm(sub(ownGoalPos, carrier.pos)), 1.6)),
+              target: add(carrier.pos, scale(norm(sub(ownGoalPos, carrier.pos)), 2.1)),
               sprint: true,
             })
           }
@@ -1624,12 +1733,17 @@ class MatchSim {
           }
         }
         if (tracker) {
-          // Görevliyle aynı noktaya yığılmasın: yakınsa kale tarafına açılır
-          const peel =
-            engager >= 0 && dist(tracker.pos, this.players[engager].pos) < 3
-              ? this.fromAttack({ x: -2.2, y: 0 }, defTeam)
-              : vec(0, 0)
-          overrides.set(tracker.id, { target: add(b.to, peel), sprint: true })
+          // Markajcı iniş noktasının YANINA gelir: topun uçuş/yuvarlanma
+          // hattının üstünde durmak her hafif uzun pası otomatik çalardı.
+          // Dik açılım kale tarafına doğru seçilir (savunma içgüdüsü doğru,
+          // hat temiz kalır); görevli de oradaysa daha geniş açılır
+          const pd = norm(sub(b.to, b.from))
+          const perp = vec(-pd.y, pd.x)
+          const ownG = this.fromAttack({ x: -HALF_LENGTH, y: 0 }, defTeam)
+          const side = (ownG.x - b.to.x) * perp.x + (ownG.y - b.to.y) * perp.y > 0 ? 1 : -1
+          const wide =
+            engager >= 0 && dist(tracker.pos, this.players[engager].pos) < 3 ? 2.6 : 1.5
+          overrides.set(tracker.id, { target: add(b.to, scale(perp, side * wide)), sprint: true })
         }
       }
       // Degaj/uzun top (hedefsiz): hücum eden taraftan da tek oyuncu gider
@@ -1639,9 +1753,16 @@ class MatchSim {
       }
     } else if (this.ball.kind === 'rolling') {
       // Boş top: takım başına yalnız en uygun TEK oyuncu (kendi ceza
-      // sahasındaysa kaleci de aday)
+      // sahasındaysa kaleci de aday). Pas yeni çıktıysa savunan takım
+      // 0.5 sn tepki gecikmesiyle harekete geçer — pasa ışınlanılmaz
       const chase = add(bp, scale(this.ball.vel, 0.3))
+      const piFresh = this.passIntent
       for (let t = 0; t < 2; t++) {
+        // Tepki gecikmesi kendi savunma üçlüsünde YOK: kutu önünde
+        // savunmacı pasa hazır bekler, orta sahada geç kalır
+        if (piFresh && t !== piFresh.team && this.tick - piFresh.tick < 3) {
+          if (this.toAttack(bp, t).x > -HALF_LENGTH / 3) continue
+        }
         const att = this.toAttack(bp, t)
         const inOwnBox =
           att.x < -HALF_LENGTH + PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
@@ -1653,7 +1774,13 @@ class MatchSim {
       // da onunla gider (savunma markaj/şekil düzeni pas boyunca aktif)
       const pi = this.passIntent
       if (pi && !this.players[pi.targetId].sentOff) {
-        const pursuit = add(bp, scale(this.ball.vel, 0.45))
+        // Alıcı topu ÖNÜNDEN karşılar: arkadan kovalarsa (ivme gerçekçi
+        // olduğundan) yetişemez ve pas yolda kesilir
+        const recv0 = this.players[pi.targetId]
+        const pursuit = this.meetRollingBall(
+          recv0,
+          maxSpeed(recv0.info.attributes) * energyFactor(recv0.energy),
+        )
         overrides.set(pi.targetId, { target: pursuit, sprint: true })
         defTeam = 1 - pi.team
         const recv = this.players[pi.targetId]
@@ -1669,11 +1796,16 @@ class MatchSim {
         }
         if (tracker) {
           const eng = this.engagerId[defTeam]
-          const peel =
-            eng >= 0 && dist(tracker.pos, this.players[eng].pos) < 3
-              ? this.fromAttack({ x: -2.2, y: 0 }, defTeam)
-              : vec(0, 0)
-          overrides.set(tracker.id, { target: add(pursuit, peel), sprint: true })
+          // Topun yuvarlanma hattının YANINA açıl (hattın üstü = otomatik
+          // araya girme); açılım kale tarafına doğru, alıcıya binme yok
+          const bv = Math.hypot(this.ball.vel.x, this.ball.vel.y)
+          const pd = bv > 0.3 ? scale(this.ball.vel, 1 / bv) : vec(1, 0)
+          const perp = vec(-pd.y, pd.x)
+          const ownG = this.fromAttack({ x: -HALF_LENGTH, y: 0 }, defTeam)
+          const side =
+            (ownG.x - pursuit.x) * perp.x + (ownG.y - pursuit.y) * perp.y > 0 ? 1 : -1
+          const wide = eng >= 0 && dist(tracker.pos, this.players[eng].pos) < 3 ? 2.6 : 1.5
+          overrides.set(tracker.id, { target: add(pursuit, scale(perp, side * wide)), sprint: true })
         }
       }
     }
@@ -1779,8 +1911,10 @@ class MatchSim {
         continue
       }
 
+      let carrierDB = 0
       if (p.id === carrierId) {
         const dB = dist(p.pos, bp)
+        carrierDB = dB
         if (dB > 1.0) {
           // Topunu kovala: vuruştan sonra topun duracağı noktaya koş
           target = add(bp, scale(ballVel, 0.3))
@@ -1877,14 +2011,21 @@ class MatchSim {
       // yalnız hedefinden iyice kopan oyuncu tam koşar
       const far = !sprint && dist(p.pos, target) > 10
       // Taşıyıcı: topu kovalarken hızlı, ayakta oynarken kısık — vur-kaç
-      // ritmi fizikten kendiliğinden doğar
-      const carrierFactor = p.id === carrierId ? (sprint ? 0.92 : 0.6) : 1
+      // ritmi fizikten kendiliğinden doğar. Çarpan top mesafesiyle SÜREKLİ
+      // geçer (0.6→0.92): ikili anahtar her vuruş döngüsünde hız zıplatıp
+      // mücadelede kekeme görüntü veriyordu
+      const carrierFactor =
+        p.id === carrierId
+          ? 0.6 + 0.32 * Math.min(1, Math.max(0, (carrierDB - 0.6) / 0.8))
+          : 1
       const spd =
         maxSpeed(p.info.attributes) *
         energyFactor(p.energy) *
         (sprint || far ? 1 : 0.7) *
         carrierFactor
-      const moved = this.movePlayer(p, target, spd, dt, sprint ? 14 : 6)
+      // Taşıyıcının çevikliği sabit kalır (vur-kaç fazları arasında 6↔14
+      // sıçraması da titreme kaynağıydı)
+      const moved = this.movePlayer(p, target, spd, dt, p.id === carrierId ? 8 : sprint ? 14 : 6)
 
       p.energy = Math.max(0.35, p.energy - moved * drainPerMeter(p.info.attributes))
       if (moved < 0.1 * dt * spd) p.energy = Math.min(1, p.energy + 0.002 * dt)
