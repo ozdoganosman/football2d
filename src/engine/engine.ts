@@ -576,7 +576,9 @@ class MatchSim {
     const d0 = d0raw
     // Uzun paslarda ve baskı altında hata payı büyür
     let err = passErrorRate(by.info.attributes) * (1 + d0 / 40)
-    err *= 1 + (1 - by.energy) * 0.4 // yorgun ayak: hata payı büyür
+    // Yorgun ayak: hata payı büyür — yalnız 0.7 enerji altında (erken/orta
+    // maçta taze oyuncunun pas kalitesi hiç etkilenmez)
+    if (by.energy < 0.7) err *= 1 + (0.7 - by.energy) * 0.9
     let passerPressure = 99
     for (const o of this.active(1 - by.teamIdx)) {
       passerPressure = Math.min(passerPressure, dist(o.pos, by.pos))
