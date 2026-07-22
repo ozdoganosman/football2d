@@ -64,7 +64,7 @@ class MatchSim {
   teams: [TeamInfo, TeamInfo]
   players: PlayerSim[] = []
   attackDir: [1 | -1, 1 | -1] = [1, -1]
-  ball: BallState = { kind: 'loose', pos: vec(0, 0), vel: vec(0, 0) }
+  ball: BallState = { kind: 'rolling', pos: vec(0, 0), vel: vec(0, 0), controllerId: -1 }
   phase: Phase = { kind: 'open' }
   restartTargets: (Vec2 | null)[] = []
   engagerId: [number, number] = [-1, -1] // takım başına topa giden görevli (histerezis)
@@ -114,8 +114,6 @@ class MatchSim {
           sentOff: false,
           yellows: 0,
           dribbleDir: null,
-          dribbleTouchTick: 0,
-          dribblePeriod: 7,
         })
       })
     }
@@ -144,25 +142,7 @@ class MatchSim {
   ballPos(): Vec2 {
     if (this.phase.kind === 'restart') return this.phase.spot
     const b = this.ball
-    if (b.kind === 'loose') return b.pos
-    if (b.kind === 'possessed') {
-      const p = this.players[b.playerId]
-      // Vur-kaç dribling: top öne vurulur, yuvarlanıp yavaşlar, oyuncu
-      // yetişir — sürekli bir eğri, ani sıçrama yok
-      if (p.dribbleDir) {
-        const phase = Math.min(
-          1,
-          (this.tick - p.dribbleTouchTick) / Math.max(1, p.dribblePeriod),
-        )
-        const lead = 0.4 + 0.34 * p.dribblePeriod * Math.sin(Math.PI * phase)
-        const raw = add(p.pos, scale(p.dribbleDir, lead))
-        return {
-          x: Math.max(-HALF_LENGTH + 0.3, Math.min(HALF_LENGTH - 0.3, raw.x)),
-          y: Math.max(-HALF_WIDTH + 0.3, Math.min(HALF_WIDTH - 0.3, raw.y)),
-        }
-      }
-      return p.pos
-    }
+    if (b.kind === 'rolling') return b.pos
     return this.flightPos(b)
   }
 
@@ -178,9 +158,14 @@ class MatchSim {
   possTeam(): number {
     if (this.phase.kind === 'restart') return this.phase.forTeam
     const b = this.ball
-    if (b.kind === 'possessed') return this.players[b.playerId].teamIdx
-    if (b.kind === 'inFlight') return this.players[b.byId].teamIdx
-    return this.lastTouchTeam
+    if (b.kind === 'rolling') {
+      return b.controllerId >= 0 ? this.players[b.controllerId].teamIdx : this.lastTouchTeam
+    }
+    return this.players[b.byId].teamIdx
+  }
+
+  controllerId(): number {
+    return this.ball.kind === 'rolling' ? this.ball.controllerId : -1
   }
 
   clockDisplay(): number {
@@ -210,8 +195,11 @@ class MatchSim {
     })
   }
 
-  possess(playerId: number): void {
-    this.ball = { kind: 'possessed', playerId }
+  // Topun kontrolünü al: top fiziksel kalır (yerinden oynamaz), yalnız
+  // kontrolcü değişir. `at` verilirse top oraya yerleştirilir (restart vb.)
+  possess(playerId: number, at?: Vec2): void {
+    const pos = at ?? (this.ball.kind === 'rolling' ? this.ball.pos : this.ballPos())
+    this.ball = { kind: 'rolling', pos: { ...pos }, vel: vec(0, 0), controllerId: playerId }
     const p = this.players[playerId]
     if (p.teamIdx !== this.lastTouchTeam) {
       this.lastTurnover = { tick: this.tick, team: p.teamIdx }
@@ -233,15 +221,21 @@ class MatchSim {
   }
 
   looseBall(pos: Vec2, velDir: Vec2, speed: number): void {
-    this.ball = { kind: 'loose', pos: { ...pos }, vel: scale(norm(velDir), speed) }
+    this.ball = {
+      kind: 'rolling',
+      pos: { ...pos },
+      vel: scale(norm(velDir), speed),
+      controllerId: -1,
+    }
   }
 
   // İlk dokunuş: top teslim alınırken kontrol testi. Sert pas, havadan gelen
   // top ve baskı zorlaştırır; kötü dokunuşta top açılır (kusursuz kontrol yok).
-  receiveBall(playerId: number, difficulty: number): void {
+  receiveBall(playerId: number, difficulty: number, at?: Vec2): void {
     const p = this.players[playerId]
+    const spot = at ?? (this.ball.kind === 'rolling' ? this.ball.pos : this.ballPos())
     if (p.info.role === 'GK') {
-      this.possess(playerId) // kaleci topu elleriyle alır
+      this.possess(playerId, spot) // kaleci topu elleriyle alır
       return
     }
     const ctl = controlSkill(p.info.attributes)
@@ -250,10 +244,10 @@ class MatchSim {
       Math.min(0.97, 0.95 - difficulty * 0.6 + (ctl - 0.65) * 0.45),
     )
     if (this.rng.chance(cleanP)) {
-      this.possess(playerId)
+      this.possess(playerId, spot)
       return
     }
-    // Kötü ilk dokunuş: top ayaktan açılır, kapışma doğar
+    // Kötü ilk dokunuş: top ayaktan sekip açılır, kapışma doğar
     this.lastTouchTeam = p.teamIdx
     this.lastTouchId = playerId
     const heavy = this.rng.chance(0.75)
@@ -261,7 +255,7 @@ class MatchSim {
       x: this.attackDir[p.teamIdx] * this.rng.range(0.2, 1) + this.rng.range(-0.6, 0.6),
       y: this.rng.range(-1, 1),
     })
-    this.looseBall(p.pos, dir, heavy ? this.rng.range(2.5, 4.5) : this.rng.range(4.5, 7))
+    this.looseBall(spot, dir, heavy ? this.rng.range(2.5, 4.5) : this.rng.range(4.5, 7))
     if (!heavy) this.pushEvent('miscontrol', p.teamIdx, playerId)
   }
 
@@ -314,9 +308,13 @@ class MatchSim {
             ux = dx / d
             uy = dy / d
           }
-          const aDown = a.id === this.downedId && this.tick < this.downedUntil
-          const bDown = b.id === this.downedId && this.tick < this.downedUntil
+          // Kontrolcü itilmez: topunu vücuduyla korur (shielding) — yoksa
+          // çarpışma onu topundan uzaklaştırıp oyunu kilitler
+          const cid = this.controllerId()
+          const aDown = (a.id === this.downedId && this.tick < this.downedUntil) || a.id === cid
+          const bDown = (b.id === this.downedId && this.tick < this.downedUntil) || b.id === cid
           const overlap = MIN - d
+          if (aDown && bDown) continue
           if (aDown) {
             b.pos.x += ux * overlap
             b.pos.y += uy * overlap
@@ -667,7 +665,7 @@ class MatchSim {
     }
 
     // taç / kale vuruşu / pas restartı: en uygun yakın takım arkadaşına pas
-    this.possess(takerId)
+    this.possess(takerId, spot)
     const mates = this.active(forTeam).filter((p) => p.id !== takerId)
     let best: PlayerSim | null = null
     let bestScore = -Infinity
@@ -1003,43 +1001,74 @@ class MatchSim {
 
   stepOpen(dt: number): void {
     // 1) Top durumu
-    if (this.ball.kind === 'possessed') {
-      this.stepPossessed()
-    } else if (this.ball.kind === 'inFlight') {
+    if (this.ball.kind === 'inFlight') {
       this.stepInFlight(dt)
     } else {
-      this.stepLoose(dt)
+      this.stepRolling(dt)
     }
 
     // 2) Oyuncu hareketi (top yeni duruma geçmiş olabilir)
     if (this.phase.kind === 'open') this.movePlayers(dt)
   }
 
-  stepPossessed(): void {
-    if (this.ball.kind !== 'possessed') return
-    const carrier = this.players[this.ball.playerId]
-    const opponents = this.active(1 - carrier.teamIdx)
+  // Yerdeki topun fizik adımı. Top HER ZAMAN kendi hız/sürtünmesiyle
+  // yuvarlanır; kontrolcü ona yetişip ayağına aldığında oynar. Top sürme =
+  // topa gerçek vuruşlar yapıp kovalamak — top asla oyuncuya geri "çekilmez".
+  stepRolling(dt: number): void {
+    if (this.ball.kind !== 'rolling') return
+    const b = this.ball
 
-    // Vur-kaç: dokunuş zamanı geldiyse yeni vuruş — süresi ve şiddeti
-    // rastgele, yön hafifçe kıvrılır (yılankavi, organik sürüş).
-    // Ara sıra top fazla açılır (ağır dokunuş).
-    if (carrier.dribbleDir && this.tick - carrier.dribbleTouchTick >= carrier.dribblePeriod) {
-      // Ağır dokunuş: top GERÇEKTEN açılır (boşa çıkar) — taşıyıcı kovalar,
-      // yakındaki savunmacı araya girebilir. Kontrolü kötü oyuncuda daha sık.
-      const heavyP = 0.16 * (1.5 - controlSkill(carrier.info.attributes))
-      if (this.rng.chance(heavyP)) {
-        this.lastTouchTeam = carrier.teamIdx
-        this.lastTouchId = carrier.id
-        this.looseBall(this.ballPos(), carrier.dribbleDir, this.rng.range(4, 6.5))
-        return
+    // Fizik: yuvarlanma + çim sürtünmesi
+    b.pos = add(b.pos, scale(b.vel, dt))
+    b.vel = scale(b.vel, Math.max(0, 1 - 1.7 * dt))
+
+    if (Math.abs(b.pos.y) > HALF_WIDTH || Math.abs(b.pos.x) > HALF_LENGTH) {
+      this.outOfBounds(b.pos)
+      return
+    }
+
+    if (b.controllerId >= 0 && this.players[b.controllerId].sentOff) b.controllerId = -1
+
+    // Boştaki top: kapma kontesti (kontrol testiyle; hızlı top zor durur).
+    // Yarıçap 1.3: çarpışma tabanı (2.0) topun iki yanında kilitlenen iki
+    // oyuncunun da erişebilmesine izin verir — kura çözer.
+    if (b.controllerId < 0) {
+      const ballSpeed = Math.hypot(b.vel.x, b.vel.y)
+      const pickupDifficulty = ballSpeed < 2.5 ? 0 : (ballSpeed - 2.5) * 0.1
+      const contenders = this.active().filter((p) => dist(p.pos, b.pos) < 1.3)
+      if (contenders.length === 1) {
+        this.receiveBall(contenders[0].id, pickupDifficulty)
+      } else if (contenders.length > 1) {
+        let total = 0
+        const weights = contenders.map((p) => {
+          const w = interceptSkill(p.info.attributes)
+          total += w
+          return w
+        })
+        let roll = this.rng.next() * total
+        for (let i = 0; i < contenders.length; i++) {
+          roll -= weights[i]
+          if (roll <= 0) {
+            this.receiveBall(contenders[i].id, pickupDifficulty + 0.2)
+            break
+          }
+        }
       }
-      carrier.dribbleTouchTick = this.tick
-      carrier.dribblePeriod = this.rng.chance(0.12) ? this.rng.int(9, 12) : this.rng.int(5, 9)
-      const ang = this.rng.range(-0.35, 0.35)
-      const cos = Math.cos(ang)
-      const sin = Math.sin(ang)
-      const d = carrier.dribbleDir
-      carrier.dribbleDir = norm({ x: d.x * cos - d.y * sin, y: d.x * sin + d.y * cos })
+      return
+    }
+
+    const carrier = this.players[b.controllerId]
+    const opponents = this.active(1 - carrier.teamIdx)
+    const dBall = dist(carrier.pos, b.pos)
+
+    // Kontrol kaybı: top kontrolcüden koptu ve bir rakip topa bariz daha yakın
+    if (dBall > 2.4) {
+      for (const o of opponents) {
+        if (dist(o.pos, b.pos) < dBall - 0.6) {
+          b.controllerId = -1
+          return
+        }
+      }
     }
 
     // Müdahale denemeleri
@@ -1057,7 +1086,7 @@ class MatchSim {
         this.possess(tackler.id)
       } else {
         this.looseBall(
-          carrier.pos,
+          b.pos,
           { x: this.rng.range(-1, 1), y: this.rng.range(-1, 1) },
           this.rng.range(2, 5),
         )
@@ -1070,8 +1099,9 @@ class MatchSim {
       this.players[outcome.tacklerId].tackleCooldown = 0.8
     }
 
-    // Karar zamanı mı?
-    if (this.tick >= this.nextDecisionTick) {
+    // Karar zamanı mı? Yalnız top ayaktayken (oyuncu fiziksel topa yetişmişse)
+    const ballSpeedNow = Math.hypot(b.vel.x, b.vel.y)
+    if (dBall < 1.6 && ballSpeedNow < 3.5 && this.tick >= this.nextDecisionTick) {
       const mates = this.active(carrier.teamIdx)
       if (carrier.info.role === 'GK') {
         this.gkDistribute(carrier, mates, opponents)
@@ -1152,10 +1182,16 @@ class MatchSim {
         }
       }
 
+      // VURUŞ: topa gerçek impuls — top öne yuvarlanır, oyuncu kovalar,
+      // yetişince tekrar oynar. Ağır dokunuş topu fazla açar (kontrolü
+      // kötü oyuncuda daha sık) ve rakip araya girebilir.
       carrier.dribbleDir = noisy
-      carrier.dribbleTouchTick = this.tick
-      carrier.dribblePeriod = this.rng.int(5, 9)
-      this.nextDecisionTick = this.tick + 11
+      const heavyP = 0.14 * (1.5 - controlSkill(carrier.info.attributes))
+      const kick = this.rng.chance(heavyP) ? this.rng.range(6.5, 8.5) : this.rng.range(4.2, 6)
+      b.vel = scale(noisy, kick)
+      this.lastTouchTeam = carrier.teamIdx
+      this.lastTouchId = carrier.id
+      this.nextDecisionTick = this.tick + 3
     }
   }
 
@@ -1240,43 +1276,6 @@ class MatchSim {
     if (b.t >= 1) this.resolvePassArrival()
   }
 
-  stepLoose(dt: number): void {
-    if (this.ball.kind !== 'loose') return
-    const b = this.ball
-    b.pos = add(b.pos, scale(b.vel, dt))
-    b.vel = scale(b.vel, Math.max(0, 1 - 1.7 * dt))
-
-    if (Math.abs(b.pos.y) > HALF_WIDTH || Math.abs(b.pos.x) > HALF_LENGTH) {
-      this.outOfBounds(b.pos)
-      return
-    }
-
-    // Kapma: 0.9 m içindeki oyuncular arasında pozisyon alma ağırlıklı kura.
-    // Hızlı yuvarlanan topu durdurmak da kontrol ister (yavaş top temiz alınır).
-    const ballSpeed = Math.hypot(b.vel.x, b.vel.y)
-    const pickupDifficulty =
-      ballSpeed < 2.5 ? 0 : (ballSpeed - 2.5) * 0.1
-    const contenders = this.active().filter((p) => dist(p.pos, b.pos) < 0.9)
-    if (contenders.length === 1) {
-      this.receiveBall(contenders[0].id, pickupDifficulty)
-    } else if (contenders.length > 1) {
-      let total = 0
-      const weights = contenders.map((p) => {
-        const w = interceptSkill(p.info.attributes)
-        total += w
-        return w
-      })
-      let roll = this.rng.next() * total
-      for (let i = 0; i < contenders.length; i++) {
-        roll -= weights[i]
-        if (roll <= 0) {
-          this.receiveBall(contenders[i].id, pickupDifficulty + 0.2)
-          break
-        }
-      }
-    }
-  }
-
   // FM tarzı görev sistemi: topa takım başına TEK oyuncu gider (first
   // defender). Aday seçimi maliyete dayanır: mesafe + rolün doğal bölgesine
   // uygunluk (DF geride, MF ortada, FW ileride karşılar). Histerezis, görevin
@@ -1322,7 +1321,7 @@ class MatchSim {
     // Rakipler: görevli (müdahale için temas gerekir) ve topu taşıyan hariç,
     // ~1.2 m mesafe korunur — çekişme anlarında üst üste binme olmaz
     if (p.id !== this.engagerId[p.teamIdx]) {
-      const carrierId = this.ball.kind === 'possessed' ? this.ball.playerId : -1
+      const carrierId = this.controllerId()
       for (const q of this.active(1 - p.teamIdx)) {
         if (q.id === carrierId) continue
         const d = dist(p.pos, q.pos)
@@ -1344,15 +1343,15 @@ class MatchSim {
   movePlayers(dt: number): void {
     const bp = this.ballPos()
     const possTeam = this.possTeam()
-    const carrierId = this.ball.kind === 'possessed' ? this.ball.playerId : -1
+    const carrierId = this.controllerId()
 
     // Görev atamaları (FM modeli): topa yalnız görevli gider, bir oyuncu
     // arkasını alır, kalanlar markaj yapar ya da şekli korur.
     const overrides = new Map<number, { target: Vec2; sprint: boolean }>()
     let defTeam = -1
 
-    if (this.ball.kind === 'possessed') {
-      const carrier = this.players[this.ball.playerId]
+    if (carrierId >= 0) {
+      const carrier = this.players[carrierId]
       defTeam = 1 - carrier.teamIdx
       const ballAttDef = this.toAttack(bp, defTeam)
       // Top kendi yarı sahasına yaklaştıysa sert angajman; rakip sahadaysa
@@ -1466,7 +1465,7 @@ class MatchSim {
         const att = this.assignEngager(1 - defTeam, b.to, 30)
         if (att >= 0) overrides.set(att, { target: b.to, sprint: true })
       }
-    } else if (this.ball.kind === 'loose') {
+    } else if (this.ball.kind === 'rolling') {
       // Boş top: takım başına yalnız en uygun TEK oyuncu (kendi ceza
       // sahasındaysa kaleci de aday)
       const chase = add(bp, scale(this.ball.vel, 0.3))
@@ -1527,10 +1526,11 @@ class MatchSim {
       }
     }
 
+    const ballVel = this.ball.kind === 'rolling' ? this.ball.vel : vec(0, 0)
+
     for (const p of this.active()) {
       let target: Vec2
       let sprint = false
-      let dribblePhase = -1
       const ov = overrides.get(p.id)
 
       // Faulle yerde kalan oyuncu kalkana kadar hareket etmez
@@ -1539,19 +1539,20 @@ class MatchSim {
         continue
       }
 
-      if (p.id === carrierId && !p.dribbleDir) {
-        // Topu akışta kontrol: alıcı ani durmaz, momentumuyla yavaşlayarak
-        // süzülür (her pasta duraksama hissi kalkar)
-        p.vel = scale(p.vel, Math.max(0, 1 - 2.8 * dt))
-        p.pos = add(p.pos, scale(p.vel, dt))
-        continue
-      }
-
       if (p.id === carrierId) {
-        target = add(p.pos, scale(p.dribbleDir as Vec2, 6))
-        sprint = true
-        // Vur-kaç ritmi: topa vururken yavaşlar, top öndeyken hızlanır
-        dribblePhase = Math.min(1, (this.tick - p.dribbleTouchTick) / Math.max(1, p.dribblePeriod))
+        const dB = dist(p.pos, bp)
+        if (dB > 1.0) {
+          // Topunu kovala: vuruştan sonra topun duracağı noktaya koş
+          target = add(bp, scale(ballVel, 0.3))
+          sprint = true
+        } else if (p.dribbleDir) {
+          target = add(p.pos, scale(p.dribbleDir, 3))
+        } else {
+          // Alım anı: ani durmaz, momentumuyla süzülerek yavaşlar
+          p.vel = scale(p.vel, Math.max(0, 1 - 2.8 * dt))
+          p.pos = add(p.pos, scale(p.vel, dt))
+          continue
+        }
       } else if (ov) {
         target = ov.target
         sprint = ov.sprint
@@ -1588,14 +1589,9 @@ class MatchSim {
       // Enerji tasarrufu: pozisyon tutarken tempolu yürüyüş/hafif koşu;
       // yalnız hedefinden iyice kopan oyuncu tam koşar
       const far = !sprint && dist(p.pos, target) > 10
-      // Vur-kaç: vuruş anlarında (başta/sonda) yavaş, top öndeyken hızlı —
-      // yumuşak sinüs profili
-      const carrierFactor =
-        p.id === carrierId
-          ? dribblePhase >= 0
-            ? 0.64 + 0.22 * Math.sin(Math.PI * dribblePhase)
-            : 0.79
-          : 1
+      // Taşıyıcı: topu kovalarken hızlı, ayakta oynarken kısık — vur-kaç
+      // ritmi fizikten kendiliğinden doğar
+      const carrierFactor = p.id === carrierId ? (sprint ? 0.92 : 0.6) : 1
       const spd =
         maxSpeed(p.info.attributes) *
         energyFactor(p.energy) *
@@ -1620,8 +1616,8 @@ class MatchSim {
     const f = this.frames
     const bp = this.ballPos()
     let label = -1
-    if (this.ball.kind === 'possessed') label = this.ball.playerId
-    else label = this.lastTouchId
+    const cid = this.controllerId()
+    label = cid >= 0 ? cid : this.lastTouchId
     f[o + F_CLOCK] = this.clockDisplay()
     f[o + F_LABEL] = label
     f[o + F_POSS_TEAM] = this.possTeam()

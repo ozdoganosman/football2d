@@ -44,8 +44,10 @@ export interface FormationSlot {
 }
 
 export type BallState =
-  | { kind: 'loose'; pos: Vec2; vel: Vec2 }
-  | { kind: 'possessed'; playerId: number }
+  // Yerdeki top HER ZAMAN fizikseldir: konum + hız + sürtünme.
+  // controllerId topu "kullanan" oyuncudur (-1 = boşta); top sürme, topa
+  // gerçek vuruşlar yapıp kovalamaktır — top oyuncuya bağlı değildir.
+  | { kind: 'rolling'; pos: Vec2; vel: Vec2; controllerId: number }
   | {
       kind: 'inFlight'
       from: Vec2
@@ -91,8 +93,6 @@ export interface PlayerSim {
   sentOff: boolean
   yellows: number
   dribbleDir: Vec2 | null // topu taşırken seçilen yön
-  dribbleTouchTick: number // vur-kaç ritmi için son dokunuş referansı
-  dribblePeriod: number // bu dokunuşun süresi (tick) — her vuruşta değişir
 }
 
 export type MatchEventKind =

@@ -89,9 +89,6 @@ export class Renderer {
     // Oyuncular
     const labelIdx = this.fv(f0, F_LABEL)
     const downIdx = this.fv(f0, F_DOWN)
-    let carrierDx = 0.7
-    let carrierDy = 0.7
-    let ballAttached = false
     for (let i = 0; i < 22; i++) {
       const px = this.lerpVal(f0, f1, F_PLAYERS + i * 2, a)
       const py = this.lerpVal(f0, f1, F_PLAYERS + i * 2 + 1, a)
@@ -106,22 +103,12 @@ export class Renderer {
         this.drawPlayer(px, py, isGk ? team.gkColor : team.color, info.number)
       }
       if (i === labelIdx) this.drawLabel(px, py, info.name)
-      // Top bir oyuncudaysa koşu yönünde, ayağının önünde çizilir
-      if (Math.hypot(px - ballX, py - ballY) < 0.5) {
-        ballAttached = true
-        const dx = this.fv(f1, F_PLAYERS + i * 2) - this.fv(f0, F_PLAYERS + i * 2)
-        const dy = this.fv(f1, F_PLAYERS + i * 2 + 1) - this.fv(f0, F_PLAYERS + i * 2 + 1)
-        const len = Math.hypot(dx, dy)
-        if (len > 0.01) {
-          carrierDx = dx / len
-          carrierDy = dy / len
-        }
-      }
     }
 
-    // Top (yükseklikle: gölge yerde kalır, top büyüyüp yukarı kayar)
+    // Top: konumu artık gerçek fizikten gelir — yapay ofset yok
+    // (yükseklikle: gölge yerde kalır, top büyüyüp yukarı kayar)
     const ballH = this.lerpVal(f0, f1, F_BALL_H, a)
-    this.drawBall(ballX, ballY, ballAttached ? carrierDx : 0, ballAttached ? carrierDy : 0, ballH)
+    this.drawBall(ballX, ballY, 0, 0, ballH)
   }
 
   private drawPlayer(x: number, y: number, color: string, num: number): void {
