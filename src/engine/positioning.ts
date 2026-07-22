@@ -57,6 +57,9 @@ export function targetPosition(
     const pressCap = slot.role === 'DF' ? 10 : slot.role === 'MF' ? 24 : 45
     x = Math.max(x, Math.min(ballAtt.x, pressCap) - maxDrop)
     x = Math.min(x, ballAtt.x + maxAhead)
+    // Hat, topu izleyerek kale çizgisine kadar İNEMEZ: kutu önünde tutunur
+    // (son adam kuralı topsuz koşucular için bundan bağımsız derine çekebilir)
+    if (slot.role === 'DF') x = Math.max(x, -HALF_LENGTH + 12)
   }
 
   return toPitch(

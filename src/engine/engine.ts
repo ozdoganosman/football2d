@@ -1332,7 +1332,10 @@ class MatchSim {
       // Kademe: kale tarafındaki aday tercih edilir — arkadan kovalayan
       // varken önden biri ÇIKAR, hat kaleye kadar geri kaçmaz
       const pAtt = this.toAttack(p.pos, teamIdx)
-      if (pAtt.x > focusAtt.x) cost += 6
+      // Tehlike bölgesinde (kaleye <30 m) görevlilik arkadan kovalayana
+      // KALMAZ: kale tarafında olmayan aday ağır ceza yer
+      const nearGoal = focusAtt.x < -HALF_LENGTH + 30
+      if (pAtt.x > focusAtt.x) cost += nearGoal ? 12 : 6
       // Çalım yemiş / müdahalesi boşa çıkmış oyuncu görevden düşer:
       // kademedeki oyuncu birinci adam olarak devralır
       if (p.tackleCooldown > 0.4) cost += 9
@@ -1444,6 +1447,36 @@ class MatchSim {
               scale(norm(sub(ownGoal, carrier.pos)), 5.5),
             )
             overrides.set(second.id, { target: coverPoint, sprint: false })
+          }
+        }
+      }
+
+      // STOPER ALARMI: taşıyıcı kaleye 30 m yaklaştıysa ve görevli kale
+      // tarafında değilse (yalnız arkadan kovalanıyorsa), en yakın öndeki
+      // stoper çıkıp taşıyıcı-kale hattını DOĞRUDAN kapatır
+      const ownGoalPos = this.fromAttack({ x: -HALF_LENGTH, y: 0 }, defTeam)
+      const goalDistA = dist(carrier.pos, ownGoalPos)
+      if (goalDistA < 30) {
+        const eng = this.engagerId[defTeam]
+        const engOk =
+          eng >= 0 && this.toAttack(this.players[eng].pos, defTeam).x < ballAttDef.x - 0.5
+        if (!engOk) {
+          let stopper: PlayerSim | null = null
+          let sd = 25
+          for (const q of this.active(defTeam)) {
+            if (q.info.role !== 'DF') continue
+            if (this.toAttack(q.pos, defTeam).x >= ballAttDef.x) continue
+            const dd = dist(q.pos, carrier.pos)
+            if (dd < sd) {
+              sd = dd
+              stopper = q
+            }
+          }
+          if (stopper) {
+            overrides.set(stopper.id, {
+              target: add(carrier.pos, scale(norm(sub(ownGoalPos, carrier.pos)), 1.6)),
+              sprint: true,
+            })
           }
         }
       }

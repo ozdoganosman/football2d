@@ -35,16 +35,17 @@ export function shotQualityAt(
 ): number {
   const goal: Vec2 = { x: HALF_LENGTH, y: 0 }
   const d = dist(att, goal)
-  if (d > 32) return 0
-  const distFactor = Math.max(0, 1 - d / 38)
+  if (d > 34) return 0
+  const distFactor = Math.max(0, 1 - d / 40)
   const angleFactor = 1 - Math.min(1, Math.abs(att.y) / 24) * 0.8
   let nearest = 99
   for (const o of opponents) {
     if (o.sentOff || o.info.role === 'GK') continue
     nearest = Math.min(nearest, dist(o.pos, shooter.pos))
   }
-  // Çarpışma tabanı 2.0 m: baskı ölçümü tabandan itibaren sayılır
-  const pressureFactor = 0.5 + 0.5 * Math.min(1, Math.max(0, (nearest - 1.8) / 5))
+  // Çarpışma tabanı 2.0 m: baskı ölçümü tabandan itibaren sayılır.
+  // Taban 0.55: üstü kapatılan oyuncu da şutu "yine de dener" (uzaktan şutlar)
+  const pressureFactor = 0.55 + 0.45 * Math.min(1, Math.max(0, (nearest - 1.8) / 5))
   return distFactor * angleFactor * pressureFactor * shootSkill(shooter.info.attributes)
 }
 
@@ -127,8 +128,8 @@ export function decide(
   if (quality > 0.02) {
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
-    if (inBox || quality > 0.13) {
-      const score = quality * 1.1 + (inBox ? 0.14 : 0)
+    if (inBox || quality > 0.1) {
+      const score = quality * 1.35 + (inBox ? 0.18 : 0)
       options.push({ kind: 'shoot', quality, score })
     }
   }
