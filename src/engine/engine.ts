@@ -382,6 +382,14 @@ class MatchSim {
           const cid = this.controllerId()
           const aDown = (a.id === this.downedId && this.tick < this.downedUntil) || a.id === cid
           const bDown = (b.id === this.downedId && this.tick < this.downedUntil) || b.id === cid
+          // Çalımda az önce ekarte olmuş (tackleCooldown'da) rakip, topu
+          // taşıyanın önünde fiziksel duvar olmaya devam etmesin — "adamı
+          // geçti" anı görünür olsun. Yoksa duel kazanılır ama rakibin
+          // yerinden kımıldamamış bedenine hemen bir sonraki dokunuşta
+          // tekrar çarpılır (gidiyor duruyor kekemeliği).
+          if ((a.tackleCooldown > 0 && b.id === cid) || (b.tackleCooldown > 0 && a.id === cid)) {
+            continue
+          }
           const overlap = MIN - d
           if (aDown && bDown) continue
           if (aDown) {
