@@ -1570,6 +1570,9 @@ class MatchSim {
     }
 
     const ballVel = this.ball.kind === 'rolling' ? this.ball.vel : vec(0, 0)
+    // Defanstan çıkış tespiti: topu kontrol eden takım kendi üçte birinde
+    const ballAttPoss = possTeam >= 0 ? this.toAttack(bp, possTeam) : null
+    const buildUp = ballAttPoss !== null && ballAttPoss.x < -18
 
     for (const p of this.active()) {
       let target: Vec2
@@ -1611,6 +1614,42 @@ class MatchSim {
           if (attT.x > onsideLine - 0.4) {
             target = this.fromAttack({ x: onsideLine - 0.4, y: attT.y }, p.teamIdx)
           }
+        }
+
+        // Defanstan çıkış düzeni: sahayı büyüt. Stoperler ceza sahası
+        // genişliğine açılır, bekler yüksek ve geniş çıkar, pivot topun
+        // önünde ilk pas hattına iner, kanatlar geniş kalır — kısa pas
+        // açıları doğar, pres kırılır.
+        if (
+          buildUp &&
+          ballAttPoss &&
+          p.teamIdx === possTeam &&
+          p.id !== carrierId &&
+          p.info.role !== 'GK' &&
+          p.info.role !== 'FW'
+        ) {
+          const slot = this.slotOf(p)
+          let att = this.toAttack(target, p.teamIdx)
+          if (p.info.role === 'DF') {
+            if (Math.abs(slot.width) >= 0.5) {
+              // bek: yüksek ve geniş
+              att = { x: Math.max(att.x, ballAttPoss.x + 10), y: Math.sign(slot.width) * 23 }
+            } else {
+              // stoper: genişliğe açıl, topla aynı hatta kal
+              const side = slot.width !== 0 ? Math.sign(slot.width) : p.slotIdx % 2 ? 1 : -1
+              att = { x: Math.min(att.x, ballAttPoss.x + 6), y: side * 14 }
+            }
+          } else if (Math.abs(slot.width) < 0.35) {
+            // pivot / merkez orta saha: topun önünde kademeli pas hattı
+            att = {
+              x: ballAttPoss.x + 8 + Math.abs(slot.width) * 20,
+              y: att.y * 0.4,
+            }
+          } else {
+            // kanat orta saha: geniş kal, sahayı yay
+            att = { x: att.x, y: Math.sign(slot.width) * Math.max(Math.abs(att.y), 22) }
+          }
+          target = this.fromAttack(att, p.teamIdx)
         }
 
         // Son adam kuralı (yalnız bölge tutan DF'ler): hattın arkasında

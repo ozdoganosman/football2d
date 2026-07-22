@@ -103,7 +103,7 @@ export function decide(
     const recvSpace = Math.min(1, recvMin / 8)
     const progress = positionValue(toAttack(m.pos, attackDir)) - myValue
 
-    const progressW = counter ? 0.58 : 0.42
+    const progressW = counter ? 0.6 : 0.48
     // Koşu yoluna pas: ileri koşan takım arkadaşı değerli bir hedeftir
     const runSpeed = (m.vel.x * attackDir + Math.abs(m.vel.y) * 0.3) / 7
     const runBonus = Math.max(0, Math.min(0.14, runSpeed * 0.14))
@@ -115,7 +115,8 @@ export function decide(
       0.09 +
       (passLen > 26 ? -0.02 * (passLen - 26) : 0) +
       (passLen < 10 ? -0.012 * (10 - passLen) : 0)
-    if (m.info.role === 'GK') score -= 0.3
+    // Kaleci +1 adamdır: defanstan çıkışta geri pas meşru bir seçenek
+    if (m.info.role === 'GK') score -= att.x < -15 ? 0.08 : 0.3
     // Baskı altındayken güvenli (açık) pas cazipleşir
     score += pressure * laneOpen * 0.12
     options.push({ kind: 'pass', targetId: m.id, score })
@@ -126,7 +127,7 @@ export function decide(
   if (quality > 0.02) {
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
-    if (inBox || quality > 0.16) {
+    if (inBox || quality > 0.13) {
       const score = quality * 1.1 + (inBox ? 0.14 : 0)
       options.push({ kind: 'shoot', quality, score })
     }
@@ -192,10 +193,16 @@ export function decide(
     options.push({ kind: 'dribble', dir: takeOnDir, score: takeOnScore, takeOn: true })
   }
 
-  // Degaj: kendi üçte birlik alanında baskı altında
+  // Degaj: kendi üçte birlik alanında baskı altında. Açık kısa pas yoksa
+  // kısa oynamayı ZORLAMA — uzuna git (çıkışın emniyet supabı)
   if (att.x < -HALF_LENGTH / 3) {
+    let bestPassScore = -1
+    for (const o of options) {
+      if (o.kind === 'pass' && o.score > bestPassScore) bestPassScore = o.score
+    }
     const depthFactor = Math.min(1, (-att.x - HALF_LENGTH / 3) / 20 + 0.4)
-    options.push({ kind: 'clear', score: pressure * depthFactor * 0.85 })
+    const trapped = bestPassScore < 0.42 ? 0.12 : 0
+    options.push({ kind: 'clear', score: pressure * depthFactor * 0.85 + trapped })
   }
 
   // Küçük gürültü determinist RNG'den — aynı seed aynı maç
