@@ -239,9 +239,11 @@ class MatchSim {
       return
     }
     const ctl = controlSkill(p.info.attributes)
+    // Kolay top (yavaş, yerden, baskısız) neredeyse her zaman temiz alınır;
+    // zorluk arttıkça kontrol becerisi belirleyici olur
     const cleanP = Math.max(
       0.4,
-      Math.min(0.97, 0.95 - difficulty * 0.6 + (ctl - 0.65) * 0.45),
+      Math.min(0.985, 0.985 - difficulty * 0.65 + (ctl - 0.65) * 0.45),
     )
     if (this.rng.chance(cleanP)) {
       this.possess(playerId, spot)
@@ -489,8 +491,11 @@ class MatchSim {
       passerPressure = Math.min(passerPressure, dist(o.pos, by.pos))
     }
     if (passerPressure < 5) err *= 1 + (1 - passerPressure / 5) * 0.7
-    // Ara sıra pas ayağa oturmaz: gözle görülür bozuk pas
-    if (this.rng.chance(0.06)) err *= 2.5
+    // Kısa hazırlık pasları teknik olarak kolaydır — hata payı düşük
+    if (d0 < 14) err *= 0.5
+    // Bozuk pas: baskı ve mesafeyle olasılığı artar (rahat kısa pasta nadir)
+    const mishitP = 0.015 + (passerPressure < 3 ? 0.05 : 0) + (d0 > 25 ? 0.03 : 0)
+    if (this.rng.chance(mishitP)) err *= 2.5
     const target = {
       x: to.pos.x + lead.x + this.rng.range(-1, 1) * err * d0,
       y: to.pos.y + lead.y + this.rng.range(-1, 1) * err * d0,
@@ -1292,6 +1297,13 @@ class MatchSim {
       // Santraforlar baskıya isteksizdir: yalnız çok yüksek toplara giderler
       const depthPref = p.info.role === 'DF' ? -22 : p.info.role === 'MF' ? -2 : 26
       let cost = d + Math.abs(focusAtt.x - depthPref) * 0.22
+      // Kademe: kale tarafındaki aday tercih edilir — arkadan kovalayan
+      // varken önden biri ÇIKAR, hat kaleye kadar geri kaçmaz
+      const pAtt = this.toAttack(p.pos, teamIdx)
+      if (pAtt.x > focusAtt.x) cost += 6
+      // Çalım yemiş / müdahalesi boşa çıkmış oyuncu görevden düşer:
+      // kademedeki oyuncu birinci adam olarak devralır
+      if (p.tackleCooldown > 0.4) cost += 9
       if (p.id === this.engagerId[teamIdx]) cost *= 0.72
       if (cost < bestCost) {
         bestCost = cost
@@ -1391,10 +1403,15 @@ class MatchSim {
           if (inOwnBox) {
             overrides.set(second.id, { target: carrier.pos, sprint: true })
           } else {
-            overrides.set(second.id, {
-              target: add(carrier.pos, this.fromAttack({ x: -6, y: 0 }, defTeam)),
-              sprint: false,
-            })
+            // Kademe: ikinci adam top ile KENDİ KALESİ arasındaki hat üzerinde,
+            // görevlinin ~5.5 m gerisinde açıyla durur — görevli geçilirse
+            // önünde o var
+            const ownGoal = vec(-HALF_LENGTH * this.attackDir[defTeam], 0)
+            const coverPoint = add(
+              carrier.pos,
+              scale(norm(sub(ownGoal, carrier.pos)), 5.5),
+            )
+            overrides.set(second.id, { target: coverPoint, sprint: false })
           }
         }
       }
@@ -1478,12 +1495,13 @@ class MatchSim {
       }
     }
 
-    // Son adam kuralı: savunma hattı en derine sarkan rakip koşucuyu takip
-    // eder — hattın arkasında koşucu bırakılmaz
+    // Son adam kuralı: savunma hattı en derine sarkan TOPSUZ rakip koşucuyu
+    // takip eder. Topu süren oyuncu hesaba katılmaz — o geri kaçılarak değil,
+    // önden çıkan görevliyle KARŞILANIR (kademe mantığı)
     let deepestThreat = 99
     if (defTeam >= 0) {
       for (const o of this.active(1 - defTeam)) {
-        if (o.info.role === 'GK') continue
+        if (o.info.role === 'GK' || o.id === carrierId) continue
         deepestThreat = Math.min(deepestThreat, this.toAttack(o.pos, defTeam).x)
       }
     }
@@ -1577,6 +1595,17 @@ class MatchSim {
           const floor = Math.max(deepestThreat - 1, -HALF_LENGTH + 5)
           if (attT.x > floor) {
             target = this.fromAttack({ x: floor, y: attT.y }, p.teamIdx)
+          }
+        }
+
+        // Kademeli hat: toptan uzak kanattaki savunmacılar biraz derine
+        // kademelenir — hat düz bir çizgi değil, çapraz bir merdiven olur
+        if (p.teamIdx === defTeam && p.info.role === 'DF') {
+          const latDist = Math.abs(target.y - bp.y)
+          const drop = Math.min(3, Math.max(0, latDist - 8) * 0.15)
+          if (drop > 0) {
+            const attT = this.toAttack(target, p.teamIdx)
+            target = this.fromAttack({ x: attT.x - drop, y: attT.y }, p.teamIdx)
           }
         }
       }
