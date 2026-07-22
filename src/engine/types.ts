@@ -60,6 +60,7 @@ export type BallState =
       shotQuality?: number
       offside?: boolean // pas anında alıcı ofsayttaydı; varışta düdük çalınır
       hMax?: number // uçuş tepe yüksekliği (m); 0/undefined = yerden pas
+      curl?: number // yalnız şutlarda: yanal falso genliği (m), iki uçta da sıfır
     }
 
 export type RestartKind =

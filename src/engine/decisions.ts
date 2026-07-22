@@ -46,7 +46,11 @@ export function shotQualityAt(
   // Çarpışma tabanı 2.0 m: baskı ölçümü tabandan itibaren sayılır.
   // Taban 0.55: üstü kapatılan oyuncu da şutu "yine de dener" (uzaktan şutlar)
   const pressureFactor = 0.55 + 0.45 * Math.min(1, Math.max(0, (nearest - 1.8) / 5))
-  return distFactor * angleFactor * pressureFactor * shootSkill(shooter.info.attributes)
+  // Yorgun bacak: bitiricilik düşer (taze oyuncuda çarpan 1.0, hiç etkisiz)
+  const staminaFactor = 0.8 + 0.2 * shooter.energy
+  return (
+    distFactor * angleFactor * pressureFactor * staminaFactor * shootSkill(shooter.info.attributes)
+  )
 }
 
 const toAttack = (p: Vec2, d: 1 | -1): Vec2 => ({ x: p.x * d, y: p.y * d })

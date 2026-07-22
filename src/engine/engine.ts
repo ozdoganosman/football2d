@@ -27,6 +27,7 @@ import {
   drainPerMeter,
   dribbleSkill,
   energyFactor,
+  gkSkill,
   interceptSkill,
   maxSpeed,
   passErrorRate,
@@ -102,6 +103,9 @@ class MatchSim {
   nextDecisionTick = 0
   refPos: Vec2 = vec(-10, -HALF_WIDTH + 6)
   pendingShot: ShotOutcome | null = null
+  // Kaleci şutu okuyup hedefe atlar: reaksiyon gecikmesi geçene kadar
+  // normal pozisyon takibinde kalır, sonra bu hedefe sprint override eder.
+  keeperDive: { keeperId: number; to: Vec2; readyTick: number } | null = null
   events: MatchEvent[] = []
   frames = new Float32Array(MAX_TICKS * FRAME_STRIDE)
   shots: [number, number] = [0, 0]
@@ -170,7 +174,12 @@ class MatchSim {
     const tt = Math.min(1, b.t)
     const eased =
       b.flight === 'shot' || (b.hMax ?? 0) > 0 ? tt : 1 - Math.pow(1 - tt, 1.6)
-    return lerp(b.from, b.to, eased)
+    const pos = lerp(b.from, b.to, eased)
+    // Şut falsosu: iki uçta da sıfıra dönen yanal bombe, varış noktasını bozmaz
+    if (b.flight === 'shot' && b.curl) {
+      pos.y += b.curl * Math.sin(Math.PI * tt)
+    }
+    return pos
   }
 
   possTeam(): number {
@@ -567,6 +576,7 @@ class MatchSim {
     const d0 = d0raw
     // Uzun paslarda ve baskı altında hata payı büyür
     let err = passErrorRate(by.info.attributes) * (1 + d0 / 40)
+    err *= 1 + (1 - by.energy) * 0.4 // yorgun ayak: hata payı büyür
     let passerPressure = 99
     for (const o of this.active(1 - by.teamIdx)) {
       passerPressure = Math.min(passerPressure, dist(o.pos, by.pos))
@@ -666,25 +676,51 @@ class MatchSim {
     let targetY: number
     if (outcome.kind === 'missed') {
       targetY = (this.rng.chance(0.5) ? 1 : -1) * this.rng.range(HALF_GOAL + 0.4, HALF_GOAL + 4)
+    } else if (outcome.kind === 'goal') {
+      // Kaleci beaten: köşeye/dip direğe yakın, gerçekten zor bir nokta
+      const sign = this.rng.chance(0.5) ? 1 : -1
+      targetY = sign * this.rng.range(HALF_GOAL * 0.45, HALF_GOAL - 0.3)
     } else {
-      targetY = this.rng.range(-HALF_GOAL + 0.5, HALF_GOAL - 0.5)
+      // Kurtarış/korner: merkeze yakın, kalecinin makul erişimindeki bölge
+      targetY = this.rng.range(-HALF_GOAL * 0.6, HALF_GOAL * 0.6)
     }
     const target = { x: HALF_LENGTH * dir, y: targetY }
     const d = Math.max(1, dist(from, target))
+    // Şut hızı vuruş gücüne/kaliteye bağlı: zayıf şut ~17-20 m/s, güçlü ve
+    // isabetli şut ~30-33 m/s — artık her şut aynı sabit tempoda gitmiyor
+    const skill = shootSkill(by.info.attributes)
+    const shotSpeed = Math.max(
+      15,
+      Math.min(33, 15 + skill * 13 + quality * 4 + this.rng.range(-2, 2)),
+    )
     this.ball = {
       kind: 'inFlight',
       from,
       to: target,
       t: 0,
-      duration: d / 22,
+      duration: d / shotSpeed,
       flight: 'shot',
       byId,
       targetId: null,
       shotQuality: quality,
+      curl: this.rng.range(-0.9, 0.9),
     }
     this.lastTouchTeam = by.teamIdx
     this.lastTouchId = byId
     this.shots[by.teamIdx]++
+
+    // Kaleci şutu okur ve varış noktasına atlar: iyi kaleci / zayıf şut daha
+    // hızlı tepki alır, sert/kaliteli şutta reaksiyon payı daralır
+    if (keeper) {
+      const gk = gkSkill(keeper.info.attributes)
+      const reactionTicks = Math.max(
+        1,
+        Math.round((0.1 + (1 - gk) * 0.22 + quality * 0.12) / TICK_DT),
+      )
+      this.keeperDive = { keeperId: keeper.id, to: { ...target }, readyTick: this.tick + reactionTicks }
+    } else {
+      this.keeperDive = null
+    }
   }
 
   launchClearance(byId: number): void {
@@ -896,6 +932,7 @@ class MatchSim {
     const by = this.players[byId]
     const outcome = this.pendingShot ?? { kind: 'missed' as const }
     this.pendingShot = null
+    this.keeperDive = null
     const keeper = this.keeperOf(1 - by.teamIdx)
 
     if (outcome.kind === 'goal') {
@@ -1768,6 +1805,17 @@ class MatchSim {
     const ballAttPoss = possTeam >= 0 ? this.toAttack(bp, possTeam) : null
     const buildUp = ballAttPoss !== null && ballAttPoss.x < -18
 
+    // Kaleci atlayışı: reaksiyon süresi dolduysa şutun varış noktasına
+    // sprint override eder — normal pozisyon takibinin önüne geçer
+    if (
+      this.keeperDive &&
+      this.ball.kind === 'inFlight' &&
+      this.ball.flight === 'shot' &&
+      this.tick >= this.keeperDive.readyTick
+    ) {
+      overrides.set(this.keeperDive.keeperId, { target: this.keeperDive.to, sprint: true })
+    }
+
     for (const p of this.active()) {
       let target: Vec2
       let sprint = false
@@ -1886,7 +1934,7 @@ class MatchSim {
         carrierFactor
       const moved = this.movePlayer(p, target, spd, dt, sprint ? 14 : 6)
 
-      p.energy = Math.max(0.35, p.energy - moved * drainPerMeter(p.info.attributes))
+      p.energy = Math.max(0.2, p.energy - moved * drainPerMeter(p.info.attributes))
       if (moved < 0.1 * dt * spd) p.energy = Math.min(1, p.energy + 0.002 * dt)
     }
 
