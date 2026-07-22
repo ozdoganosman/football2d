@@ -170,11 +170,13 @@ export function decide(
     }
   }
   const space = Math.min(1, aheadSpace / 12)
-  // İyi top sürücüler önlerinde alan varken taşımayı sever; kontrada daha da
+  // Önünde (rakip kaleye bakan koridorda) alan olan oyuncu topu SÜRMEYE
+  // meyillidir: puan alan-güdümlü — boş saha gören adam taşır, kalabalıkta
+  // pas arar. Kontrada iştah daha da artar.
   const dribbleScore =
-    0.5 +
-    0.3 * space * dribbleSkill(carrier.info.attributes) +
-    (counter ? 0.08 : 0) -
+    0.4 +
+    0.48 * space * dribbleSkill(carrier.info.attributes) +
+    (counter ? 0.1 : 0) -
     pressure * 0.42
   options.push({ kind: 'dribble', dir: goalDir, score: dribbleScore })
 
