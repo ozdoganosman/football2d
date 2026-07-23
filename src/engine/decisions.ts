@@ -6,7 +6,7 @@ import {
 } from './constants'
 import { dribbleSkill, shootSkill } from './attributes'
 import { dist, distToSegment, norm, sub } from './vec'
-import type { PlayerSim, Vec2 } from './types'
+import { BALANCED_TACTICS, type PlayerSim, type TeamTactics, type Vec2 } from './types'
 import type { Rng } from './rng'
 
 export type Decision =
@@ -64,6 +64,7 @@ export function decide(
   attackDir: 1 | -1,
   rng: Rng,
   counter = false, // top yeni kazanıldı: dikine oyna, hızlı bitir
+  tactics: TeamTactics = BALANCED_TACTICS,
 ): Decision {
   const att = toAttack(carrier.pos, attackDir)
   const myValue = positionValue(att)
@@ -116,7 +117,8 @@ export function decide(
     const recvSpace = Math.min(1, recvMin / 8)
     const progress = positionValue(toAttack(m.pos, attackDir)) - myValue
 
-    const progressW = counter ? 0.6 : 0.48
+    // Taktik mentalite: hücumcu ileri pası daha çok değerler (0 = dengeli)
+    const progressW = (counter ? 0.6 : 0.48) + tactics.mentality * 0.08
     // Koşu yoluna pas: ileri koşan takım arkadaşı değerli bir hedeftir
     const runSpeed = (m.vel.x * attackDir + Math.abs(m.vel.y) * 0.3) / 7
     const runBonus = Math.max(0, Math.min(0.14, runSpeed * 0.14))
@@ -158,7 +160,8 @@ export function decide(
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
     if (inBox || quality > 0.1) {
-      const score = quality * 1.35 + (inBox ? 0.18 : 0)
+      // Taktik mentalite: hücumcu takım şutu biraz daha ister (0 = dengeli)
+      const score = quality * 1.35 + (inBox ? 0.18 : 0) + tactics.mentality * 0.05
       options.push({ kind: 'shoot', quality, score })
     }
   }

@@ -26,6 +26,15 @@ export interface PlayerInfo {
 
 export type FormationId = '4-4-2' | '4-3-3' | '4-2-3-1' | '3-5-2'
 
+// Takım taktiği: her eksen -1 / 0 / +1. 0 = dengeli (mevcut varsayılan davranış).
+export interface TeamTactics {
+  mentality: number // -1 defansif, 0 dengeli, +1 hücumcu (blok yüksekliği + risk)
+  press: number // -1 alçak blok, 0 orta, +1 yüksek pres (karşılama hattı)
+  width: number // -1 dar, 0 normal, +1 geniş (blok genişliği)
+}
+
+export const BALANCED_TACTICS: TeamTactics = { mentality: 0, press: 0, width: 0 }
+
 export interface TeamInfo {
   name: string
   shortName: string
@@ -34,6 +43,7 @@ export interface TeamInfo {
   formation: FormationId
   starters: PlayerInfo[] // 11 oyuncu, [0] kaleci
   subs: PlayerInfo[]
+  tactics?: TeamTactics // yoksa dengeli
 }
 
 // Formasyon slotu: depth 0 = kendi kale çizgisi, 1 = rakip kale çizgisi; width -1..1

@@ -13,6 +13,13 @@ const btnPlay = document.getElementById('btnPlay') as HTMLButtonElement
 const modeSel = document.getElementById('modeSel') as HTMLSelectElement
 const homeFormation = document.getElementById('homeFormation') as HTMLSelectElement
 const awayFormation = document.getElementById('awayFormation') as HTMLSelectElement
+const tac = (id: string): HTMLSelectElement => document.getElementById(id) as HTMLSelectElement
+const homeMentality = tac('homeMentality')
+const homePress = tac('homePress')
+const homeWidth = tac('homeWidth')
+const awayMentality = tac('awayMentality')
+const awayPress = tac('awayPress')
+const awayWidth = tac('awayWidth')
 const seedInfo = document.getElementById('seedInfo') as HTMLElement
 const speedButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.btn.speed'))
 
@@ -33,8 +40,24 @@ let playback: Playback
 let hud: Hud | null = null
 
 function newMatch(): void {
-  const home: TeamInfo = { ...KIZILKAYA, formation: homeFormation.value as FormationId }
-  const away: TeamInfo = { ...MAVIDERE, formation: awayFormation.value as FormationId }
+  const home: TeamInfo = {
+    ...KIZILKAYA,
+    formation: homeFormation.value as FormationId,
+    tactics: {
+      mentality: Number(homeMentality.value),
+      press: Number(homePress.value),
+      width: Number(homeWidth.value),
+    },
+  }
+  const away: TeamInfo = {
+    ...MAVIDERE,
+    formation: awayFormation.value as FormationId,
+    tactics: {
+      mentality: Number(awayMentality.value),
+      press: Number(awayPress.value),
+      width: Number(awayWidth.value),
+    },
+  }
   // Seed motor dışında üretilir; motor içinde tek rastgelelik kaynağı seeded RNG'dir
   const seed = (Math.random() * 0x7fffffff) | 0
 

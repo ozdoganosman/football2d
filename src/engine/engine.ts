@@ -45,6 +45,7 @@ import { resolveShot, type ShotOutcome } from './shooting'
 import { moveReferee } from './referee'
 import { add, clampVec, dist, lerp, norm, scale, sub, vec } from './vec'
 import { buildHighlights } from './highlights'
+import { BALANCED_TACTICS } from './types'
 import type {
   BallState,
   FormationSlot,
@@ -58,6 +59,7 @@ import type {
   RestartKind,
   SubRecord,
   TeamInfo,
+  TeamTactics,
   Vec2,
 } from './types'
 
@@ -134,6 +136,8 @@ class MatchSim {
   subsUsed: [number, number] = [0, 0]
   subWindowIdx: [number, number] = [0, 0]
   substitutions: SubRecord[] = []
+  // Takım taktiği (mentalite/pres/genişlik); yoksa dengeli
+  tactics: [TeamTactics, TeamTactics] = [BALANCED_TACTICS, BALANCED_TACTICS]
 
   constructor(home: TeamInfo, away: TeamInfo, seed: number) {
     this.rng = createRng(seed)
@@ -146,6 +150,7 @@ class MatchSim {
       subs: [...tm.subs],
     })
     this.teams = [clone(home), clone(away)]
+    this.tactics = [home.tactics ?? BALANCED_TACTICS, away.tactics ?? BALANCED_TACTICS]
     this.benchPool = [[...this.teams[0].subs], [...this.teams[1].subs]]
     for (let t = 0; t < 2; t++) {
       const info = this.teams[t]
@@ -1553,6 +1558,7 @@ class MatchSim {
         this.attackDir[carrier.teamIdx],
         this.rng,
         counter,
+        this.tactics[carrier.teamIdx],
       )
       this.nextDecisionTick = this.tick + (counter ? 6 : 8)
       if (decision.kind === 'pass') {
@@ -1863,7 +1869,8 @@ class MatchSim {
       const ballAttDef = this.toAttack(bp, defTeam)
       // Top kendi yarı sahasına yaklaştıysa sert angajman; rakip sahadaysa
       // mesafeli karşılama (bekler, dalmaz) — full saha pres yok
-      const aggressive = ballAttDef.x < 8
+      // Taktik pres: yüksek pres daha ileride sert angajmana geçer (0 = dengeli)
+      const aggressive = ballAttDef.x < 8 + this.tactics[defTeam].press * 10
       const engager = this.assignEngager(defTeam, carrier.pos, aggressive ? 24 : 15)
       if (engager >= 0) {
         const e = this.players[engager]
@@ -2257,7 +2264,13 @@ class MatchSim {
         // Markajcı adamına yapışık kalır — son adam kuralı ona uygulanmaz
         target = markTargets.get(p.id) as Vec2
       } else {
-        target = targetPosition(this.slotOf(p), this.attackDir[p.teamIdx], bp, possTeam === p.teamIdx)
+        target = targetPosition(
+          this.slotOf(p),
+          this.attackDir[p.teamIdx],
+          bp,
+          possTeam === p.teamIdx,
+          this.tactics[p.teamIdx],
+        )
 
         // Hücumdaki oyuncu ofsayt çizgisinin gerisinde kalır (çizgi dansı)
         if (p.teamIdx === possTeam && p.id !== carrierId) {
