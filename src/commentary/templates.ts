@@ -1,20 +1,31 @@
-import type { MatchEvent, TeamInfo } from '../engine/types'
+import type { MatchEvent, SubRecord, TeamInfo } from '../engine/types'
 import { createRng } from '../engine/rng'
+import { playerInfoAt } from '../engine/roster'
 
 // Olaylardan Türkçe yorum satırları. Deterministik olması için seçim,
 // olayın tick'inden türetilen mini RNG ile yapılır.
 
-function playerName(teams: [TeamInfo, TeamInfo], id: number): string {
+function playerName(
+  teams: [TeamInfo, TeamInfo],
+  subs: SubRecord[],
+  id: number,
+  tick: number,
+): string {
   if (id < 0) return ''
-  const team = teams[Math.floor(id / 11)]
-  return team.starters[id % 11]?.name ?? ''
+  return playerInfoAt(teams, subs, id, tick)?.name ?? ''
 }
 
-export function commentaryFor(e: MatchEvent, teams: [TeamInfo, TeamInfo]): string | null {
+export function commentaryFor(
+  e: MatchEvent,
+  teams: [TeamInfo, TeamInfo],
+  subs: SubRecord[] = [],
+): string | null {
+  // Hazır metin (örn. oyuncu değişikliği) varsa doğrudan onu kullan
+  if (e.text) return e.text
   const rng = createRng(e.tick * 7919 + 13)
   const pick = (arr: string[]): string => arr[Math.floor(rng.next() * arr.length)]
-  const P = playerName(teams, e.playerId)
-  const T = playerName(teams, e.targetId)
+  const P = playerName(teams, subs, e.playerId, e.tick)
+  const T = playerName(teams, subs, e.targetId, e.tick)
   const team = e.teamIdx >= 0 ? teams[e.teamIdx] : null
   const TN = team?.name ?? ''
 

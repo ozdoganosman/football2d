@@ -12,6 +12,7 @@ import {
   HALF_WIDTH,
 } from '../engine/constants'
 import type { MatchResult } from '../engine/types'
+import { playerInfoAt } from '../engine/roster'
 import { computeCam, drawPitch, wx, wy, type Cam } from './pitch'
 
 // Kayıtlı kareleri çizen katman. Statik saha offscreen canvas'ta tutulur,
@@ -95,7 +96,8 @@ export class Renderer {
       const teamIdx = i < 11 ? 0 : 1
       const team = result.teams[teamIdx]
       const isGk = i % 11 === 0
-      const info = team.starters[i % 11]
+      // İsim/numara zaman-farkındalıklı: o an sahada olan oyuncu (değişiklikler)
+      const info = playerInfoAt(result.teams, result.substitutions, i, f0)
       if (i === downIdx) {
         // Faulle yerde yatan oyuncu: basık elips
         this.drawDownedPlayer(px, py, isGk ? team.gkColor : team.color, info.number)

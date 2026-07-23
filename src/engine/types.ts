@@ -116,6 +116,7 @@ export type MatchEventKind =
   | 'free_kick'
   | 'offside'
   | 'miscontrol'
+  | 'substitution'
   | 'half_end'
   | 'full_time'
 
@@ -128,6 +129,16 @@ export interface MatchEvent {
   targetId: number // -1 = yok
   scoreHome: number
   scoreAway: number
+  text?: string // hazır yorum/feed metni (örn. oyuncu değişikliği); varsa şablona üstün gelir
+}
+
+// Oyuncu değişikliği kaydı: kare-slot eşlemesi zamandan bağımsız olduğundan,
+// oynatma sırasında hangi anda kimin sahada olduğunu bu kayıtlar belirler.
+export interface SubRecord {
+  tick: number
+  teamIdx: number
+  slotIdx: number
+  inInfo: PlayerInfo
 }
 
 export interface MatchStats {
@@ -156,5 +167,6 @@ export interface MatchResult {
   stats: MatchStats
   highlights: HighlightWindow[]
   seed: number
-  teams: [TeamInfo, TeamInfo]
+  teams: [TeamInfo, TeamInfo] // İLK ONBİR (starters değişmez); değişiklikler substitutions'ta
+  substitutions: SubRecord[]
 }

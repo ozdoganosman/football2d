@@ -53,8 +53,10 @@ import type {
   MatchResult,
   MatchStats,
   Phase,
+  PlayerInfo,
   PlayerSim,
   RestartKind,
+  SubRecord,
   TeamInfo,
   Vec2,
 } from './types'
@@ -126,10 +128,25 @@ class MatchSim {
   redCards: [number, number] = [0, 0]
   passesAttempted: [number, number] = [0, 0]
   passesCompleted: [number, number] = [0, 0]
+  // Oyuncu değişikliği: kalan yedek havuzu, kullanılan hak, açılmış pencere,
+  // ve kayıtlar (oynatmada zaman-farkındalıklı isim/numara için)
+  benchPool: PlayerInfo[][] = [[], []]
+  subsUsed: [number, number] = [0, 0]
+  subWindowIdx: [number, number] = [0, 0]
+  substitutions: SubRecord[] = []
 
   constructor(home: TeamInfo, away: TeamInfo, seed: number) {
     this.rng = createRng(seed)
-    this.teams = [home, away]
+    // Takımları klonla: starters/subs dizileri maç içinde referansla değişebilir;
+    // modül sabitlerine (KIZILKAYA/MAVIDERE) sızmamalı. starters DEĞİŞMEZ kalır
+    // (ilk onbir); değişiklikler player.info + substitutions kaydında tutulur.
+    const clone = (tm: TeamInfo): TeamInfo => ({
+      ...tm,
+      starters: [...tm.starters],
+      subs: [...tm.subs],
+    })
+    this.teams = [clone(home), clone(away)]
+    this.benchPool = [[...this.teams[0].subs], [...this.teams[1].subs]]
     for (let t = 0; t < 2; t++) {
       const info = this.teams[t]
       info.starters.forEach((p, i) => {
@@ -219,7 +236,7 @@ class MatchSim {
     return { x: p.x * d, y: p.y * d }
   }
 
-  pushEvent(kind: MatchEventKind, teamIdx: number, playerId = -1, targetId = -1): void {
+  pushEvent(kind: MatchEventKind, teamIdx: number, playerId = -1, targetId = -1, text?: string): void {
     this.events.push({
       tick: this.tick,
       clock: this.clockDisplay(),
@@ -229,7 +246,48 @@ class MatchSim {
       targetId,
       scoreHome: this.score[0],
       scoreAway: this.score[1],
+      text,
     })
+  }
+
+  // Oyuncu değişikliği: ölü top anlarında (setupRestart) denenir. Belirli
+  // pencerelerde (58'/68'/78') yorgun bir saha oyuncusu varsa yedekle değişir.
+  // İlk-onbir dizisi DEĞİŞMEZ (render için); yalnız player.info güncellenir ve
+  // bir SubRecord kaydı düşülür.
+  private static SUB_WINDOWS = [58 * 60, 68 * 60, 78 * 60]
+  trySubstitutions(): void {
+    const clock = this.clockDisplay()
+    for (let t = 0; t < 2; t++) {
+      if (this.subWindowIdx[t] >= MatchSim.SUB_WINDOWS.length) continue
+      if (clock < MatchSim.SUB_WINDOWS[this.subWindowIdx[t]]) continue
+      // Pencere zamanı geçti — bu pencereyi tüket (bir daha bakma)
+      this.subWindowIdx[t]++
+      if (this.subsUsed[t] >= 3) continue
+      // En yorgun saha oyuncusu (kaleci hariç), yeterince yorulmuşsa değiştir
+      let out: PlayerSim | null = null
+      for (const p of this.active(t)) {
+        if (p.info.role === 'GK') continue
+        if (!out || p.energy < out.energy) out = p
+      }
+      if (!out || out.energy > 0.66) continue
+      // Yedek seç: aynı rolde varsa onu, yoksa herhangi bir saha yedeği
+      const bench = this.benchPool[t]
+      let bi = bench.findIndex((b) => b.role === out!.info.role)
+      if (bi < 0) bi = bench.findIndex((b) => b.role !== 'GK')
+      if (bi < 0) continue
+      const inInfo = bench[bi]
+      bench.splice(bi, 1)
+      const outInfo = out.info
+      out.info = inInfo
+      out.energy = 1
+      out.yellows = 0
+      out.tackleCooldown = 0
+      out.dribbleDir = null
+      this.subsUsed[t]++
+      this.substitutions.push({ tick: this.tick, teamIdx: t, slotIdx: out.slotIdx, inInfo })
+      const text = `Oyuncu değişikliği (${this.teams[t].shortName}): ${outInfo.name} ⬇ ${inInfo.name} ⬆`
+      this.pushEvent('substitution', t, out.id, -1, text)
+    }
   }
 
   // Topun kontrolünü al: top fiziksel kalır (yerinden oynamaz), yalnız
@@ -442,6 +500,8 @@ class MatchSim {
   // --- restart kurulumu ---
 
   setupRestart(kind: RestartKind, forTeam: number, spot: Vec2, timer: number): void {
+    // Ölü top anı: oyuncu değişikliği penceresi açıldıysa değerlendir
+    this.trySubstitutions()
     const takerId = this.pickTaker(kind, forTeam, spot)
     this.engagerId = [-1, -1]
     this.passIntent = null
@@ -2357,6 +2417,7 @@ export function simulateMatch(
     stats: sim.buildStats(),
     highlights: buildHighlights(sim.events, frameCount),
     seed,
-    teams: [home, away],
+    teams: sim.teams, // ilk onbir (klon; starters değişmez)
+    substitutions: sim.substitutions,
   }
 }

@@ -44,8 +44,8 @@ function newMatch(): void {
   if (!renderer) renderer = new Renderer(canvas, result)
   else renderer.setResult(result)
 
-  if (!hud) hud = new Hud(result.teams)
-  else hud.reset(result.teams)
+  if (!hud) hud = new Hud(result.teams, result.substitutions)
+  else hud.reset(result.teams, result.substitutions)
 
   playback = new Playback(result, modeSel.value as PlaybackMode, {
     onEvent: (e, visible) => hud?.applyEvent(e, visible),

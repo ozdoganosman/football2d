@@ -1,9 +1,11 @@
 import { commentaryFor } from '../commentary/templates'
-import type { MatchEvent, TeamInfo } from '../engine/types'
+import { playerInfoAt } from '../engine/roster'
+import type { MatchEvent, SubRecord, TeamInfo } from '../engine/types'
 
 // Skorboard, yorum bandı, istatistik tablosu ve olay akışı.
 export class Hud {
   private teams: [TeamInfo, TeamInfo]
+  private subs: SubRecord[] = []
   private score: [number, number] = [0, 0]
   private shots: [number, number] = [0, 0]
   private onTarget: [number, number] = [0, 0]
@@ -24,13 +26,15 @@ export class Hud {
 
   private possession: [number, number] = [50, 50]
 
-  constructor(teams: [TeamInfo, TeamInfo]) {
+  constructor(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = []) {
     this.teams = teams
-    this.reset(teams)
+    this.subs = subs
+    this.reset(teams, subs)
   }
 
-  reset(teams: [TeamInfo, TeamInfo]): void {
+  reset(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = []): void {
     this.teams = teams
+    this.subs = subs
     this.score = [0, 0]
     this.shots = [0, 0]
     this.onTarget = [0, 0]
@@ -86,6 +90,9 @@ export class Hud {
       case 'penalty_awarded':
         this.addFeed(e, `Penaltı: ${this.teams[t].name}`, 'goal')
         break
+      case 'substitution':
+        if (e.text) this.addFeed(e, e.text, 'neutral')
+        break
       default:
         break
     }
@@ -99,7 +106,7 @@ export class Hud {
     this.renderStats()
 
     if (visible) {
-      const text = commentaryFor(e, this.teams)
+      const text = commentaryFor(e, this.teams, this.subs)
       if (text) {
         let cls: string = e.teamIdx === 0 ? 'home' : e.teamIdx === 1 ? 'away' : 'neutral'
         if (e.kind === 'goal') cls = 'goal'
@@ -111,8 +118,7 @@ export class Hud {
 
   private eventPlayer(e: MatchEvent): string {
     if (e.playerId < 0) return ''
-    const team = this.teams[Math.floor(e.playerId / 11)]
-    return team.starters[e.playerId % 11]?.name ?? ''
+    return playerInfoAt(this.teams, this.subs, e.playerId, e.tick)?.name ?? ''
   }
 
   private addFeed(e: MatchEvent, text: string, cls: string): void {
