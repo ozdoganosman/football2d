@@ -36,7 +36,11 @@ export function targetPosition(
   // Topsuz blok kendi kalesine yaklaştıkça daralır: top kendi kutusuna
   // indiğinde bekler içeri kapanır, ceza sahası önü kalabalıklaşır
   const defDepth = Math.min(1, Math.max(0, (-ballAtt.x - 10) / 30))
-  const widthScale = hasPossession ? 1.05 : 0.82 - 0.3 * defDepth
+  // Toptayken takım ilerledikçe sahayı yayar: top kendi yarısındayken
+  // varsayılan genişlik (1.05), rakip yarıya geçtikçe kanatlar tacı yaklaşıp
+  // hücumda boşluk yaratır. attackProgress: top x=-10'da 0, x=+35'te 1.
+  const attackProgress = Math.min(1, Math.max(0, (ballAtt.x + 10) / 45))
+  const widthScale = hasPossession ? 1.05 + 0.2 * attackProgress : 0.82 - 0.3 * defDepth
   const push = hasPossession ? 5 : -5
 
   let x = home.x + ballAtt.x * 0.3 + push

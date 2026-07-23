@@ -104,6 +104,10 @@ class MatchSim {
   // aynı an geri kapamasın diye kısa bir ayrışma penceresi (bkz. stepRolling)
   justKickedId = -1
   justKickedTick = -1
+  // Kaleci oyun kurarken: takım açılana kadar topu tutabileceği son tick.
+  // possess() içinde kaleci topu alınca kurulur; gkDistribute bu sınıra
+  // kadar (baskı yoksa ve iyi bir açı yoksa) dağıtımı erteler.
+  gkHoldUntil = 0
   nextDecisionTick = 0
   refPos: Vec2 = vec(-10, -HALF_WIDTH + 6)
   pendingShot: ShotOutcome | null = null
@@ -265,6 +269,9 @@ class MatchSim {
     // Kontrol dokunuşu: top alındıktan sonra karar için kısa süre geçer;
     // bu süre savunmanın baskı kurmasına imkân verir
     this.nextDecisionTick = this.tick + (p.info.role === 'GK' ? 12 : 9)
+    // Kaleci topu alınca: takım build-up şekline açılana kadar (baskı yoksa)
+    // topu tutabileceği tavan — ~2.8 sn (12 tick karar penceresi + 28 tick hold)
+    if (p.info.role === 'GK') this.gkHoldUntil = this.tick + 40
     // İlk dokunuş koruması: alıcı topu kontrol edecek kadar zaman bulur
     for (const o of this.active(1 - p.teamIdx)) {
       if (dist(o.pos, p.pos) < 2.5) {
@@ -1362,6 +1369,27 @@ class MatchSim {
       if (score > bestScore) {
         bestScore = score
         best = m
+      }
+    }
+    // Takım açılana kadar bekle: iyi bir kısa pas açısı henüz yoksa, kaleciye
+    // baskı yoksa ve bekleme tavanı dolmadıysa topu tut — bekler/kanatlar
+    // genişledikçe (build-up şekli oturdukça) açı doğar. Bir tavan var ki
+    // sonsuza dek beklemesin (dolunca ya pas ya degaj).
+    if (this.tick < this.gkHoldUntil && bestScore < 0.55) {
+      let nearestOpp = 99
+      for (const o of opponents) nearestOpp = Math.min(nearestOpp, dist(o.pos, gk.pos))
+      let minY = 99
+      let maxY = -99
+      for (const m of mates) {
+        if (m.id === gk.id) continue
+        minY = Math.min(minY, m.pos.y)
+        maxY = Math.max(maxY, m.pos.y)
+      }
+      const teamWidth = maxY - minY
+      // Baskı yok + takım henüz yeterince geniş açılmadı → tut, yeniden yokla
+      if (nearestOpp > 12 && teamWidth < 48) {
+        this.nextDecisionTick = this.tick + 3
+        return
       }
     }
     if (best && bestScore > 0.25) this.launchPass(gk.id, best.id)

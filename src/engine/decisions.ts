@@ -138,6 +138,17 @@ export function decide(
     if (m.info.role === 'GK') score -= att.x < -15 ? 0.08 : 0.3
     // Baskı altındayken güvenli (açık) pas cazipleşir
     score += pressure * laneOpen * 0.12
+    // Defanstan çıkışta genişe oyna: taşıyıcı kendi savunma üçte birindeyken
+    // (att.x < -17.5), kendisinden belirgin daha geniş ve geride kalmayan
+    // açık bir arkadaş cazipleşir. positionValue merkezi ödüllediği için
+    // top hep içeriden çıkıyordu; bu terim onu dengeleyip topu kanattan
+    // güvenli çıkarır. Yalnız build-up'a özel — genel oyunu kanada kaydırmaz.
+    if (att.x < -HALF_LENGTH / 3) {
+      const recvWide = Math.abs(m.pos.y)
+      if (recvWide > Math.abs(carrier.pos.y) + 3 && mAttX > att.x - 4) {
+        score += 0.1 * Math.min(1, recvWide / HALF_WIDTH) * laneOpen
+      }
+    }
     options.push({ kind: 'pass', targetId: m.id, score })
   }
 
