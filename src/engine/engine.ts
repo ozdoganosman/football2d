@@ -100,6 +100,10 @@ class MatchSim {
   possTicks: [number, number] = [0, 0]
   lastTouchTeam = 0
   lastTouchId = 0
+  // Bir pası az önce atan oyuncu, top henüz kendi ayağının dibindeyken onu
+  // aynı an geri kapamasın diye kısa bir ayrışma penceresi (bkz. stepRolling)
+  justKickedId = -1
+  justKickedTick = -1
   nextDecisionTick = 0
   refPos: Vec2 = vec(-10, -HALF_WIDTH + 6)
   pendingShot: ShotOutcome | null = null
@@ -649,6 +653,14 @@ class MatchSim {
       this.passIntent = { byId, targetId, team: by.teamIdx, offside }
       this.lastTouchTeam = by.teamIdx
       this.lastTouchId = byId
+      // Yalnız kaleci: elle kapma kontrolsüz/hep başarılı olduğundan, dar
+      // alanda kendi kısa pasını aynı an geri kapayıp döngüye girebiliyordu
+      // (bkz. stepRolling). Saha oyuncularında zaten bir kontrol zarı var,
+      // dokunuşu doğal bir varyans; onlara dokunmuyoruz.
+      if (by.info.role === 'GK') {
+        this.justKickedId = byId
+        this.justKickedTick = this.tick
+      }
       this.passesAttempted[by.teamIdx]++
       this.pushEvent('pass', by.teamIdx, byId, targetId)
       return
@@ -1169,7 +1181,14 @@ class MatchSim {
       const ballSpeed = Math.hypot(b.vel.x, b.vel.y)
       // Yumuşak varış kolay, sıcak gelen pas zor kontrol edilir
       const pickupDifficulty = ballSpeed < 4 ? 0 : (ballSpeed - 4) * 0.09
-      const contenders = this.active().filter((p) => dist(p.pos, b.pos) < 1.3)
+      // Pası atan, topu ayağının dibinden anında geri kapamasın: top henüz
+      // ayrılmadan aynı tick(ler)de kendine "pas" atmış gibi bir döngüye
+      // girmesin (özellikle kaleci — elle kapma kontrolsüz, hep başarılı).
+      const contenders = this.active().filter(
+        (p) =>
+          dist(p.pos, b.pos) < 1.3 &&
+          !(p.id === this.justKickedId && this.tick - this.justKickedTick < 4),
+      )
       if (contenders.length === 1) {
         this.receiveBall(contenders[0].id, pickupDifficulty)
       } else if (contenders.length > 1) {
