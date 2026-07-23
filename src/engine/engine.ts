@@ -42,7 +42,7 @@ import { decide, shotQualityAt, type Decision } from './decisions'
 import { attemptTackle } from './duels'
 import { resolveShot, type ShotOutcome } from './shooting'
 import { moveReferee } from './referee'
-import { add, dist, lerp, norm, scale, sub, vec } from './vec'
+import { add, clampVec, dist, lerp, norm, scale, sub, vec } from './vec'
 import { buildHighlights } from './highlights'
 import type {
   BallState,
@@ -183,8 +183,9 @@ class MatchSim {
     const eased =
       b.flight === 'shot' || (b.hMax ?? 0) > 0 ? tt : 1 - Math.pow(1 - tt, 1.6)
     const pos = lerp(b.from, b.to, eased)
-    // Şut falsosu: iki uçta da sıfıra dönen yanal bombe, varış noktasını bozmaz
-    if (b.flight === 'shot' && b.curl) {
+    // Falso: iki uçta da sıfıra dönen yanal bombe, varış noktasını bozmaz.
+    // Şutlarda (duvar üstü kıvrılma) ve ortalarda (iç/dış falso korner) çalışır.
+    if ((b.flight === 'shot' || b.flight === 'cross') && b.curl) {
       pos.y += b.curl * Math.sin(Math.PI * tt)
     }
     return pos
@@ -479,6 +480,116 @@ class MatchSim {
     return (best ?? mates[0]).id
   }
 
+  // Serbest vuruş tipi (hücum çerçevesinde spot konumuna göre):
+  //  - shoot: kaleye yakın + merkezi → direkt şut tehdidi (duvar kurulur)
+  //  - cross: son üçte bir ama yan/uzak → kutuya orta (korner gibi)
+  //  - short: kendi yarısı / orta saha → kısa oyna
+  freeKickType(spot: Vec2, forTeam: number): 'shoot' | 'cross' | 'short' {
+    const att = this.toAttack(spot, forTeam)
+    const goalDist = dist(att, { x: HALF_LENGTH, y: 0 })
+    if (goalDist < 25 && Math.abs(att.y) < 20) return 'shoot'
+    if (att.x > HALF_LENGTH - 32 && goalDist < 46) return 'cross'
+    return 'short'
+  }
+
+  // Kutuya yığılma: hücumcuları yakın/uzak direk, penaltı noktası ve kutu
+  // önüne; savunmayı direkler + markaj + kutu önüne yerleştirir, kaleci
+  // çizgide. Korner ve kanattan serbest vuruşta ortak kullanılır.
+  // nearSide: hücum çerçevesinde topun geldiği taraf işareti (+1/-1).
+  loadBox(
+    targets: (Vec2 | null)[],
+    attTeam: number,
+    takerId: number,
+    nearSide: number,
+  ): void {
+    const defTeam = 1 - attTeam
+    const A = (x: number, y: number): Vec2 => this.fromAttack({ x, y }, attTeam)
+    // Hücumcu yerleşimi (hücum çerçevesi): en derin/hücumcu 5 oyuncu
+    const attSpots: Vec2[] = [
+      { x: HALF_LENGTH - 5.5, y: nearSide * 4.5 }, // yakın direk
+      { x: HALF_LENGTH - 1.5, y: -nearSide * 5.5 }, // uzak direk
+      { x: HALF_LENGTH - 10.5, y: nearSide * 0.5 }, // penaltı noktası
+      { x: HALF_LENGTH - 6.5, y: -nearSide * 2 }, // merkez
+      { x: HALF_LENGTH - 17, y: nearSide * 2.5 }, // kutu önü (ikinci top)
+    ]
+    const attackers = this.active(attTeam)
+      .filter((p) => p.id !== takerId && p.info.role !== 'GK')
+      .sort((a, b) => this.slotOf(b).depth - this.slotOf(a).depth)
+      .slice(0, attSpots.length)
+    attackers.forEach((p, i) => {
+      targets[p.id] = A(attSpots[i].x + this.rng.range(-1, 1), attSpots[i].y + this.rng.range(-1, 1))
+    })
+    // Kaleci çizgide, merkez/uzak direğe hafif
+    const gk = this.keeperOf(defTeam)
+    if (gk) targets[gk.id] = A(HALF_LENGTH - 1.5, -nearSide * 1.5)
+    // Savunma: yakın direk, uzak direk, 6 pas alanı markaj, kutu önü temizleyici
+    const defSpots: Vec2[] = [
+      { x: HALF_LENGTH - 1, y: nearSide * 3.4 }, // yakın direk
+      { x: HALF_LENGTH - 1, y: -nearSide * 3.4 }, // uzak direk
+      { x: HALF_LENGTH - 6, y: nearSide * 3 },
+      { x: HALF_LENGTH - 6, y: -nearSide * 3.5 },
+      { x: HALF_LENGTH - 11, y: nearSide * 1 }, // penaltı noktası bölgesi
+      { x: HALF_LENGTH - 17, y: -nearSide * 0.5 }, // kutu önü (ikinci top)
+    ]
+    const defenders = this.active(defTeam)
+      .filter((p) => p.info.role !== 'GK')
+      .sort((a, b) => this.slotOf(a).depth - this.slotOf(b).depth) // en defansif önce
+      .slice(0, defSpots.length)
+    defenders.forEach((p, i) => {
+      targets[p.id] = A(defSpots[i].x + this.rng.range(-1, 1), defSpots[i].y + this.rng.range(-1, 1))
+    })
+  }
+
+  // Kutuya orta: iç falso (yakın direk), dış falso (uzak direk) ya da sürülü
+  // top (penaltı noktası). Korner ve kanattan serbest vuruşta kullanılır.
+  crossIntoBox(takerId: number, forTeam: number, spot: Vec2, nearSide: number): void {
+    const A = (x: number, y: number): Vec2 => this.fromAttack({ x, y }, forTeam)
+    const attackers = this.active(forTeam).filter((p) => p.id !== takerId && p.info.role !== 'GK')
+    const roll = this.rng.next()
+    let landing: Vec2
+    let curl: number
+    const swing = this.rng.range(1.6, 3.2)
+    if (roll < 0.4) {
+      // İç falso: yakın direğe, gole doğru kıvrılır
+      landing = A(HALF_LENGTH - 5, nearSide * 4)
+      curl = -Math.sign(spot.y || 1) * swing
+    } else if (roll < 0.74) {
+      // Dış falso: uzak direğe, çizgiden dışa açılır
+      landing = A(HALF_LENGTH - 1.5, -nearSide * 5.5)
+      curl = Math.sign(spot.y || 1) * swing
+    } else {
+      // Sürülü/düz: penaltı noktası bölgesine
+      landing = A(HALF_LENGTH - 10.5, nearSide * this.rng.range(-1.5, 1.5))
+      curl = this.rng.range(-0.8, 0.8)
+    }
+    landing = clampVec(landing, -HALF_LENGTH + 1, HALF_LENGTH - 1, -HALF_WIDTH + 1, HALF_WIDTH - 1)
+    let target: PlayerSim | null = null
+    let bd = 99
+    for (const p of attackers) {
+      const dd = dist(p.pos, landing)
+      if (dd < bd) {
+        bd = dd
+        target = p
+      }
+    }
+    const d = Math.max(1, dist(spot, landing))
+    this.ball = {
+      kind: 'inFlight',
+      from: { ...spot },
+      to: landing,
+      t: 0,
+      duration: d / 16,
+      flight: 'cross',
+      byId: takerId,
+      targetId: target?.id ?? null,
+      hMax: 4 + d * 0.05,
+      curl,
+    }
+    this.lastTouchTeam = forTeam
+    this.lastTouchId = takerId
+    this.passesAttempted[forTeam]++
+  }
+
   computeRestartTargets(): void {
     if (this.phase.kind !== 'restart') return
     const { restart, forTeam, spot, takerId } = this.phase
@@ -503,31 +614,77 @@ class MatchSim {
         .sort((a, b) => dist(a.pos, spot) - dist(b.pos, spot))[0]
       if (support) targets[support.id] = { x: -1.5 * this.attackDir[forTeam], y: 1.5 }
     } else if (restart === 'corner') {
+      // Yakın direk taraf işareti: kornerin geldiği yan (hücum çerçevesi)
+      const nearSide = Math.sign(this.toAttack(spot, forTeam).y) || 1
+      this.loadBox(targets, forTeam, takerId, nearSide)
+    } else if (restart === 'free_kick') {
+      const type = this.freeKickType(spot, forTeam)
       const defTeam = 1 - forTeam
-      const goalX = HALF_LENGTH * this.attackDir[forTeam]
-      const boxCenter = { x: goalX - 8 * this.attackDir[forTeam], y: 0 }
-      const attackers = this.active(forTeam)
-        .filter((p) => p.id !== takerId && this.slotOf(p).depth >= 0.4)
-        .sort((a, b) => this.slotOf(b).depth - this.slotOf(a).depth)
-        .slice(0, 5)
-      attackers.forEach((p, i) => {
-        targets[p.id] = {
-          x: boxCenter.x + this.rng.range(-4, 4),
-          y: boxCenter.y + (i - 2) * 4 + this.rng.range(-1.5, 1.5),
+      const nearSide = Math.sign(this.toAttack(spot, forTeam).y) || 1
+      if (type === 'shoot') {
+        // Direkt şut tehdidi: gol-top hattı üzerinde 9.15 m'de bir baraj kurulur.
+        const dir = this.attackDir[forTeam]
+        const goal = { x: HALF_LENGTH * dir, y: 0 }
+        const toGoal = norm(sub(goal, spot))
+        const perp = { x: -toGoal.y, y: toGoal.x }
+        const att = this.toAttack(spot, forTeam)
+        const wallN = Math.abs(att.y) < 10 ? 4 : 3
+        // Baraj merkezi: 9.15 m ileride, yakın direk tarafına hafif kaydırılmış
+        const wallCenter = add(add(spot, scale(toGoal, 9.15)), scale(perp, nearSide * dir * 0.9))
+        const wallDefs = this.active(defTeam)
+          .filter((p) => p.info.role !== 'GK')
+          .sort((a, b) => dist(a.pos, wallCenter) - dist(b.pos, wallCenter))
+        for (let i = 0; i < Math.min(wallN, wallDefs.length); i++) {
+          const off = (i - (wallN - 1) / 2) * 1.0
+          targets[wallDefs[i].id] = add(wallCenter, scale(perp, off))
         }
-      })
-      const defenders = this.active(defTeam)
-        .filter((p) => p.info.role !== 'GK' && this.slotOf(p).depth <= 0.45)
-        .slice(0, 6)
-      defenders.forEach((p, i) => {
-        // kale tarafında (gol çizgisine attackerlardan daha yakın) markaj
-        targets[p.id] = {
-          x: boxCenter.x + this.attackDir[forTeam] * 1.5 + this.rng.range(-3, 3),
-          y: (i - 2.5) * 3.6,
+        // Kaleci baraja karşı uzak direği kapatır (baraj yakın direği kapattı)
+        const gk = this.keeperOf(defTeam)
+        if (gk) targets[gk.id] = this.fromAttack({ x: HALF_LENGTH - 1.5, y: -nearSide * 2 }, forTeam)
+        // Birkaç hücumcu kutu içinde/önünde toparlanır (dönen top / ikinci top)
+        const boxSpots: Vec2[] = [
+          { x: HALF_LENGTH - 9, y: nearSide * 6 },
+          { x: HALF_LENGTH - 9, y: -nearSide * 6 },
+          { x: HALF_LENGTH - 16, y: 0 },
+        ]
+        const boxAtt = this.active(forTeam)
+          .filter((p) => p.id !== takerId && p.info.role !== 'GK')
+          .sort((a, b) => this.slotOf(b).depth - this.slotOf(a).depth)
+          .slice(0, boxSpots.length)
+        boxAtt.forEach((p, i) => {
+          targets[p.id] = this.fromAttack(boxSpots[i], forTeam)
+        })
+      } else if (type === 'cross') {
+        // Kanattan/uzaktan: kutuya orta düzeni (korner gibi)
+        this.loadBox(targets, forTeam, takerId, nearSide)
+      }
+      // 'short': özel hedef yok — formasyon şeklinden çıkışa bırakılır
+    } else if (restart === 'goal_kick') {
+      // Defanstan çıkış şekli: bekler geniş ve alçak, stoperler açık, bir orta
+      // saha iner — kısa oyun seçenekleri doğar (baskı yoksa kısa, varsa uzun)
+      for (const p of this.active(forTeam)) {
+        if (p.id === takerId) continue
+        const slot = this.slotOf(p)
+        if (slot.role === 'DF') {
+          const wide = Math.abs(slot.width) >= 0.5
+          targets[p.id] = this.fromAttack(
+            { x: -HALF_LENGTH + (wide ? 14 : 9), y: slot.width * (wide ? 26 : 14) },
+            forTeam,
+          )
+        } else if (slot.role === 'MF' && Math.abs(slot.width) < 0.4) {
+          targets[p.id] = this.fromAttack({ x: -HALF_LENGTH + 22, y: slot.width * 10 }, forTeam)
         }
-      })
-      const gk = this.keeperOf(defTeam)
-      if (gk) targets[gk.id] = { x: goalX - this.attackDir[forTeam] * 1, y: 0 }
+      }
+    } else if (restart === 'throw_in') {
+      // Taç: yakın iki arkadaş boşa çıkar (biri çizgi boyu ileri, biri içeri)
+      const nearSide = Math.sign(spot.y) || 1
+      const near = this.active(forTeam)
+        .filter((p) => p.id !== takerId && p.info.role !== 'GK')
+        .sort((a, b) => dist(a.pos, spot) - dist(b.pos, spot))
+        .slice(0, 2)
+      const dir = this.attackDir[forTeam]
+      if (near[0]) targets[near[0].id] = { x: spot.x + dir * 6, y: nearSide * (HALF_WIDTH - 6) }
+      if (near[1]) targets[near[1].id] = { x: spot.x - dir * 2, y: nearSide * (HALF_WIDTH - 12) }
     } else if (restart === 'penalty') {
       const defTeam = 1 - forTeam
       const gk = this.keeperOf(defTeam)
@@ -537,17 +694,15 @@ class MatchSim {
         x: spot.x - 2 * this.attackDir[forTeam],
         y: spot.y,
       }
-      // diğerleri ceza sahası dışına
+      // Diğerleri: penaltı yayının gerisinde (kutu + nokta dışında), dönen topa
+      // hazır — hücum/savunma dönüşümlü dizilir
       const boxEdgeX = HALF_LENGTH - PENALTY_AREA_DEPTH
+      let k = 0
       for (const p of this.players) {
         if (p.sentOff || p.id === takerId || (gk && p.id === gk.id)) continue
-        const att = this.toAttack(p.pos, forTeam)
-        if (att.x > boxEdgeX - 1 && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2 + 1) {
-          targets[p.id] = this.fromAttack(
-            { x: boxEdgeX - 2.5, y: Math.max(-18, Math.min(18, att.y)) },
-            forTeam,
-          )
-        }
+        const arcY = ((k % 6) - 2.5) * 3.4
+        targets[p.id] = this.fromAttack({ x: boxEdgeX - 2.5, y: arcY }, forTeam)
+        k++
       }
     }
     this.restartTargets = targets
@@ -815,29 +970,17 @@ class MatchSim {
     }
 
     if (restart === 'corner') {
-      const dir = this.attackDir[forTeam]
-      const landing = {
-        x: HALF_LENGTH * dir - dir * this.rng.range(4, 11),
-        y: this.rng.range(-7, 7),
+      const nearSide = Math.sign(this.toAttack(spot, forTeam).y) || 1
+      const attackers = this.active(forTeam).filter((p) => p.id !== takerId && p.info.role !== 'GK')
+      // Kısa korner: ~%12 — yakın arkadaşa yerden pas, oyun açık devam eder
+      if (this.rng.chance(0.12) && attackers.length) {
+        this.possess(takerId, spot)
+        const near = attackers.sort((a, b) => dist(a.pos, spot) - dist(b.pos, spot))[0]
+        this.launchPass(takerId, near.id, 'pass', true)
+        return
       }
-      const attackers = this.active(forTeam).filter(
-        (p) => p.id !== takerId && p.info.role !== 'GK',
-      )
-      attackers.sort((a, b) => dist(a.pos, landing) - dist(b.pos, landing))
-      const targetId = attackers[0]?.id ?? null
-      const d = Math.max(1, dist(spot, landing))
-      this.ball = {
-        kind: 'inFlight',
-        from: { ...spot },
-        to: landing,
-        t: 0,
-        duration: d / 16,
-        flight: 'cross',
-        byId: takerId,
-        targetId,
-        hMax: 4 + d * 0.06, // korner ortası havadan
-      }
-      this.passesAttempted[forTeam]++
+      // Orta: iç/dış falso ya da sürülü top (crossIntoBox içinde çeşitlenir)
+      this.crossIntoBox(takerId, forTeam, spot, nearSide)
       return
     }
 
@@ -848,15 +991,37 @@ class MatchSim {
     }
 
     if (restart === 'free_kick') {
+      const type = this.freeKickType(spot, forTeam)
       const att = this.toAttack(spot, forTeam)
-      const goalDist = dist(att, { x: HALF_LENGTH, y: 0 })
-      if (goalDist < 26 && Math.abs(att.y) < 18) {
-        const q = shotQualityAt(taker, att, this.active(1 - forTeam)) * 0.75
+      if (type === 'shoot') {
+        // Baraj kuruldu: top ya barajı aşar (kalite biraz düşer, falso yardımcı)
+        // ya da baraja çarpar (blok → dönen top / korner)
+        if (this.rng.chance(0.16)) {
+          this.shots[forTeam]++
+          this.pushEvent('shot_blocked', forTeam, takerId)
+          const dir = this.attackDir[forTeam]
+          // Baraja çarpan top öne sekip dönen top olur
+          this.looseBall(
+            add(spot, scale(vec(dir, 0), 8)),
+            { x: dir * this.rng.range(-0.5, 0.5), y: this.rng.range(-1, 1) },
+            this.rng.range(2, 5),
+          )
+          this.lastTouchTeam = forTeam
+          this.lastTouchId = takerId
+          return
+        }
+        const q = shotQualityAt(taker, att, this.active(1 - forTeam)) * 0.82
         if (q > 0.03) {
           this.launchShot(takerId, q)
           return
         }
+      } else if (type === 'cross') {
+        // Kanattan/uzaktan serbest vuruş: kutuya orta
+        const nearSide = Math.sign(att.y) || 1
+        this.crossIntoBox(takerId, forTeam, spot, nearSide)
+        return
       }
+      // 'short': aşağıdaki kısa pas mantığına düşer
     }
 
     // taç / kale vuruşu / pas restartı: en uygun yakın takım arkadaşına pas
