@@ -50,6 +50,10 @@ export function commentaryFor(e: MatchEvent, teams: [TeamInfo, TeamInfo]): strin
       return pick([`${P} vurdu, top az farkla dışarı!`, `${P} şansını denedi, isabetsiz`])
     case 'shot_blocked':
       return pick([`${P}'un şutu savunmaya çarptı`, `${P} vurdu ama şut kapandı`])
+    case 'header':
+      return rng.next() < 0.45
+        ? null
+        : pick([`${P} kafayı vurdu!`, `${P} yükseldi, kafa vuruşu!`, `Havada ${P} kazandı`])
     case 'goal':
       return pick([
         `GOOOL!! ${P} ağları havalandırdı! ${TN} ${e.scoreHome}-${e.scoreAway} yaptı!`,

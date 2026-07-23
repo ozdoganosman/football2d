@@ -23,6 +23,7 @@ import {
   TICKS_PER_SEC,
 } from './constants'
 import {
+  aerialSkill,
   controlSkill,
   drainPerMeter,
   dribbleSkill,
@@ -1209,6 +1210,56 @@ class MatchSim {
     this.looseBall(to, norm(sub(to, from)), this.rng.range(3.5, 5.5))
   }
 
+  // Kafa vuruşunu çöz: kazanan bölgeye göre kafayı kaleye vurur (hücum
+  // bölgesi), degaj eder (savunma bölgesi) ya da öne aşırtır (orta saha).
+  // Kafa vuruşu ayakla vuruştan daha zordur; kalite düşük, sapma yüksektir.
+  resolveHeader(winner: PlayerSim, pos: Vec2): void {
+    const team = winner.teamIdx
+    const att = this.toAttack(winner.pos, team)
+    this.lastTouchTeam = team
+    this.lastTouchId = winner.id
+    // Top kafa vuruşu noktasına yerleşir; ilgili başlatıcı buradan oynar
+    this.ball = { kind: 'rolling', pos: { ...pos }, vel: vec(0, 0), controllerId: winner.id }
+    this.pushEvent('header', team, winner.id)
+
+    // HÜCUM BÖLGESİ (rakip kaleye yakın + merkezi): kafayla şut
+    const inShootZone =
+      att.x > HALF_LENGTH - 18 && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2 + 2
+    if (inShootZone) {
+      const q = shotQualityAt(winner, att, this.active(1 - team)) * 0.68
+      if (q > 0.02) {
+        this.launchShot(winner.id, q)
+        return
+      }
+    }
+    // SAVUNMA BÖLGESİ (kendi kaleye yakın): kafayla degaj
+    if (att.x < -HALF_LENGTH + 24) {
+      this.launchClearance(winner.id)
+      return
+    }
+    // ORTA SAHA: öne aşırtma (kafayla ileri arkadaşa) ya da boşluğa indirme
+    let best: PlayerSim | null = null
+    let bestScore = -Infinity
+    for (const m of this.active(team)) {
+      if (m.id === winner.id) continue
+      const mAtt = this.toAttack(m.pos, team)
+      const d = dist(m.pos, winner.pos)
+      if (mAtt.x < att.x - 2 || d < 6 || d > 28) continue
+      const score = mAtt.x - att.x - d * 0.2
+      if (score > bestScore) {
+        bestScore = score
+        best = m
+      }
+    }
+    if (best) {
+      this.launchPass(winner.id, best.id, 'pass', true)
+    } else {
+      // İleri boşluğa indir: kafa knock-down
+      const dir = this.attackDir[team]
+      this.looseBall(pos, { x: dir, y: this.rng.range(-0.5, 0.5) }, this.rng.range(4, 7))
+    }
+  }
+
   // --- tick ---
 
   step(): void {
@@ -1607,6 +1658,48 @@ class MatchSim {
       const gk = this.keeperOf(1 - this.players[b.byId].teamIdx)
       if (gk && dist(gk.pos, pos) < 2.2 && this.rng.chance(0.4)) {
         this.possess(gk.id)
+        return
+      }
+    }
+
+    // KAFA VURUŞU: kafa hizasına inen havadan top (orta, degaj, uzun/lofted
+    // pas) yakınındaki oyuncularca kafayla oynanır. Kazanan bölgeye göre
+    // kaleye kafayı vurur, degaj eder ya da öne aşırtır (aşağıda resolveHeader).
+    const canHead =
+      b.flight === 'cross' || b.flight === 'clearance' || (b.flight === 'pass' && (b.hMax ?? 0) >= 3)
+    if (!b.offside && canHead && b.t > 0.45 && height >= 1.7 && height <= 3.3) {
+      let p1: PlayerSim | null = null
+      let d1 = 1.7
+      for (const p of this.active()) {
+        if (p.info.role === 'GK') continue
+        const dd = dist(p.pos, pos)
+        if (dd < d1) {
+          d1 = dd
+          p1 = p
+        }
+      }
+      if (p1) {
+        // Rakip taraftan en yakın rakip: ikili hava mücadelesi
+        let p2: PlayerSim | null = null
+        let d2 = 1.9
+        for (const o of this.active(1 - p1.teamIdx)) {
+          if (o.info.role === 'GK') continue
+          const dd = dist(o.pos, pos)
+          if (dd < d2) {
+            d2 = dd
+            p2 = o
+          }
+        }
+        let winner = p1
+        if (p2) {
+          // Kendi kalesini savunan (kale tarafındaki) oyuncuya hafif üstünlük
+          const bonus = (p: PlayerSim): number =>
+            this.toAttack(p.pos, p.teamIdx).x < -HALF_LENGTH + 24 ? 0.15 : 0
+          const s1 = aerialSkill(p1.info.attributes) + bonus(p1) + this.rng.range(0, 0.5)
+          const s2 = aerialSkill(p2.info.attributes) + bonus(p2) + this.rng.range(0, 0.5)
+          winner = s1 >= s2 ? p1 : p2
+        }
+        this.resolveHeader(winner, pos)
         return
       }
     }
