@@ -16,6 +16,8 @@ let totalGoals = 0
 let longThrows = 0
 let handballs = 0
 let headers = 0
+let throwIns = 0
+let intercepts = 0
 let injuries = 0
 let injSubs = 0
 let manDown = 0
@@ -36,6 +38,8 @@ for (let m = 0; m < matches; m++) {
     if (e.kind === 'throw_in' && e.text && e.text.includes('Uzun taç')) longThrows++
     if (e.text && e.text.includes('El!')) handballs++
     if (e.kind === 'header') headers++
+    if (e.kind === 'throw_in') throwIns++
+    if (e.kind === 'interception') intercepts++
     if (e.kind === 'injury') {
       if (e.text && e.text.includes('eksik')) manDown++
       else injuries++
@@ -53,5 +57,5 @@ console.log(`xG/maç ${avg(sums.xg[0])}/${avg(sums.xg[1])} (toplam xG ${avg(sums
 console.log(`Pas isabeti %${((sums.passAcc[0] / matches) * 100).toFixed(0)}/%${((sums.passAcc[1] / matches) * 100).toFixed(0)}`)
 console.log(`Uzun taç: ${avg(longThrows)}/maç (${longThrows} toplam)`)
 console.log(`El (handball): ${avg(handballs)}/maç (${handballs} toplam)`)
-console.log(`Kafa mücadelesi: ${avg(headers)}/maç`)
+console.log(`Kafa mücadelesi: ${avg(headers)}/maç  Taç: ${avg(throwIns)}/maç  Araya girme: ${avg(intercepts)}/maç`)
 console.log(`Sakatlık: ${avg(injuries + manDown)}/maç, ${injSubs} sakatlık-değişikliği, ${manDown} eksik-kalma`)

@@ -82,6 +82,8 @@ import type {
 const REG_MAX_TICKS = 2 * (HALF_SECONDS + 8 * 60) * TICKS_PER_SEC
 const KO_MAX_TICKS = REG_MAX_TICKS + (2 * (ET_SECONDS + 3 * 60) + 8 * 60) * TICKS_PER_SEC
 
+
+
 class MatchSim {
   rng: Rng
   teams: [TeamInfo, TeamInfo]
@@ -459,35 +461,24 @@ class MatchSim {
         this.pushEvent('interception', p.teamIdx, playerId)
       }
     }
-    // Kendi sürüşünü yeniden yakalamak (vur-kaç yetişmesi) YENİ kontrol
-    // değildir: fren, yön silme ve karar beklemesi uygulanmaz — bunlar her
-    // yeniden yakalamada tekrarlanınca sürücü dur-kalk yapıyordu (mücadele
-    // sırasında "takılma" görüntüsünün ana kaynağı)
-    const reControl = this.lastTouchId === playerId && this.lastTouchTeam === p.teamIdx
     if (p.teamIdx !== this.lastTouchTeam) {
       this.lastTurnover = { tick: this.tick, team: p.teamIdx }
     }
     this.lastTouchTeam = p.teamIdx
     this.lastTouchId = playerId
-    if (!reControl) {
-      p.dribbleDir = null
-      // İlk dokunuş momentumun bir kısmını öldürür (süzülme sınırlı kalır)
-      p.vel = scale(p.vel, 0.45)
-    }
+    p.dribbleDir = null
+    // İlk dokunuş momentumun bir kısmını öldürür (süzülme sınırlı kalır)
+    p.vel = scale(p.vel, 0.45)
     // Kontrol dokunuşu: top alındıktan sonra karar için kısa süre geçer;
-    // bu süre savunmanın baskı kurmasına imkân verir. Kendi topunu yeniden
-    // yakalayan sürücü akışını sürdürür (kısa nefes yeter)
-    this.nextDecisionTick = this.tick + (p.info.role === 'GK' ? 12 : reControl ? 3 : 9)
+    // bu süre savunmanın baskı kurmasına imkân verir
+    this.nextDecisionTick = this.tick + (p.info.role === 'GK' ? 12 : 9)
     // Kaleci topu alınca: takım build-up şekline açılana kadar (baskı yoksa)
     // topu tutabileceği tavan — ~2.8 sn (12 tick karar penceresi + 28 tick hold)
     if (p.info.role === 'GK') this.gkHoldUntil = this.tick + 40
-    // İlk dokunuş koruması: alıcı topu kontrol edecek kadar zaman bulur —
-    // yalnız YENİ kazanılan topta (sürüş yetişmesi rakibe dokunulmazlık vermez)
-    if (!reControl) {
-      for (const o of this.active(1 - p.teamIdx)) {
-        if (dist(o.pos, p.pos) < 2.5) {
-          o.tackleCooldown = Math.max(o.tackleCooldown, 0.6)
-        }
+    // İlk dokunuş koruması: alıcı topu kontrol edecek kadar zaman bulur
+    for (const o of this.active(1 - p.teamIdx)) {
+      if (dist(o.pos, p.pos) < 2.5) {
+        o.tackleCooldown = Math.max(o.tackleCooldown, 0.6)
       }
     }
   }
@@ -527,16 +518,12 @@ class MatchSim {
     const cleanP =
       Math.max(0.4, Math.min(0.985, 0.985 - difficulty * 0.65 + (ctl - 0.65) * 0.45)) *
       (0.5 + 0.5 * sharpness(p.energy))
-    // Kendi sürüşünü yakalıyor mu? (possess lastTouch'ı değiştirmeden ölç)
-    const reControl = this.lastTouchId === playerId && this.lastTouchTeam === p.teamIdx
     if (this.rng.chance(cleanP)) {
       this.possess(playerId, spot)
       // Yönlü ilk dokunuş: top ölü durdurulmaz — gidilecek boş yöne açılır
       // (hücum yönü + en yakın rakipten uzağa). Sert gelen top daha büyük
-      // açılır; oyuncu topla birlikte hareket etme şansı bulur. Kendi
-      // sürüşünü yakalayan İSTİSNA: kaçış dokunuşu sürüşü tersine çevirip
-      // mücadelede mekik görüntüsü veriyordu — sürücü akışında devam eder
-      if (!reControl && this.ball.kind === 'rolling' && this.phase.kind === 'open') {
+      // açılır; oyuncu topla birlikte hareket etme şansı bulur.
+      if (this.ball.kind === 'rolling' && this.phase.kind === 'open') {
         const fwd = vec(this.attackDir[p.teamIdx], 0)
         let esc = vec(0, 0)
         let nearestOpp = 99
@@ -585,7 +572,9 @@ class MatchSim {
     let dvx = (desired.x - p.vel.x) * k
     let dvy = (desired.y - p.vel.y) * k
     const dvMag = Math.hypot(dvx, dvy)
-    const maxDv = 13 * dt
+    // 45 m/s²: en sert yön dönüşlerini sınırlar (ters dönme 3.4x azalır) ama
+    // pasa yetişmeyi engellemez — 13'te alıcı topa yetişemiyor, araya girme patlıyor
+    const maxDv = 45 * dt
     if (dvMag > maxDv) {
       dvx *= maxDv / dvMag
       dvy *= maxDv / dvMag
@@ -1088,8 +1077,8 @@ class MatchSim {
     const tStop = v0 / 1.5
     // Oyuncunun t saniyede kat edebileceği yol: ivme tavanı (13 m/s²)
     // hesaba katılır — duran oyuncu ilk anda ışınlanamaz
-    const tA = maxSpd / 13
-    const reach = (t: number) => (t < tA ? 6.5 * t * t : maxSpd * (t - tA / 2))
+    const tA = maxSpd / 45
+    const reach = (t: number) => (t < tA ? 22.5 * t * t : maxSpd * (t - tA / 2))
     for (let t = 0.2; t <= 3; t += 0.2) {
       const tc = Math.min(t, tStop)
       const s = v0 * tc - 0.75 * tc * tc
@@ -2951,12 +2940,13 @@ class MatchSim {
           // hattının üstünde durmak her hafif uzun pası otomatik çalardı.
           // Dik açılım kale tarafına doğru seçilir (savunma içgüdüsü doğru,
           // hat temiz kalır); görevli de oradaysa daha geniş açılır
+          const closeToEng =
+            engager >= 0 && dist(tracker.pos, this.players[engager].pos) < 3
           const pd = norm(sub(b.to, b.from))
           const perp = vec(-pd.y, pd.x)
           const ownG = this.fromAttack({ x: -HALF_LENGTH, y: 0 }, defTeam)
           const side = (ownG.x - b.to.x) * perp.x + (ownG.y - b.to.y) * perp.y > 0 ? 1 : -1
-          const wide =
-            engager >= 0 && dist(tracker.pos, this.players[engager].pos) < 3 ? 2.6 : 1.5
+          const wide = closeToEng ? 2.6 : 1.5
           overrides.set(tracker.id, { target: add(b.to, scale(perp, side * wide)), sprint: true })
         }
       }
@@ -3036,14 +3026,17 @@ class MatchSim {
           const eng = this.engagerId[defTeam]
           // Topun yuvarlanma hattının YANINA açıl (hattın üstü = otomatik
           // araya girme); açılım kale tarafına doğru, alıcıya binme yok
+          const closeToEng2 = eng >= 0 && dist(tracker.pos, this.players[eng].pos) < 3
           const bv = Math.hypot(this.ball.vel.x, this.ball.vel.y)
           const pd = bv > 0.3 ? scale(this.ball.vel, 1 / bv) : vec(1, 0)
           const perp = vec(-pd.y, pd.x)
           const ownG = this.fromAttack({ x: -HALF_LENGTH, y: 0 }, defTeam)
-          const side =
-            (ownG.x - pursuit.x) * perp.x + (ownG.y - pursuit.y) * perp.y > 0 ? 1 : -1
-          const wide = eng >= 0 && dist(tracker.pos, this.players[eng].pos) < 3 ? 2.6 : 1.5
-          overrides.set(tracker.id, { target: add(pursuit, scale(perp, side * wide)), sprint: true })
+          const side = (ownG.x - pursuit.x) * perp.x + (ownG.y - pursuit.y) * perp.y > 0 ? 1 : -1
+          const wide = closeToEng2 ? 2.6 : 1.5
+          overrides.set(tracker.id, {
+            target: add(pursuit, scale(perp, side * wide)),
+            sprint: true,
+          })
         }
       }
     }
@@ -3231,10 +3224,8 @@ class MatchSim {
         continue
       }
 
-      let carrierDB = 0
       if (p.id === carrierId) {
         const dB = dist(p.pos, bp)
-        carrierDB = dB
         if (dB > 1.0) {
           // Topunu kovala: vuruştan sonra topun duracağı noktaya koş
           target = add(bp, scale(ballVel, 0.3))
@@ -3339,10 +3330,7 @@ class MatchSim {
       // Taşıyıcı: topu kovalarken hızlı, ayakta oynarken kısık — vur-kaç
       // ritmi fizikten kendiliğinden doğar. Taşıyıcı çarpanı top mesafesiyle
       // SÜREKLİ geçer (0.6→0.92): vuruş döngüsünde hız zıplaması titremeydi.
-      const carrierFactor =
-        p.id === carrierId
-          ? 0.6 + 0.32 * Math.min(1, Math.max(0, (carrierDB - 0.6) / 0.8))
-          : 1
+      const carrierFactor = p.id === carrierId ? (sprint ? 0.92 : 0.6) : 1
       const wantSprint = sprint || far
       // Sprint rezervi tükendiyse tam sprint hızına ulaşılamaz (üst üste koşma)
       const cap = wantSprint ? sprintCap(p.sprintReserve) : 1
@@ -3354,7 +3342,8 @@ class MatchSim {
         cap
       // Taşıyıcı çevikliği sabit (vur-kaç fazları arası 6↔14 sıçraması titremeydi);
       // yorgunlukla yine de düşer (yorgun oyuncu geç döner/hızlanır)
-      const agi = (p.id === carrierId ? 8 : sprint ? 14 : 6) * agilityFactor(p.energy)
+      // Çeviklik yorgunlukla düşer: yorgun oyuncu geç döner/hızlanır
+      const agi = (sprint ? 14 : 6) * agilityFactor(p.energy)
       const moved = this.movePlayer(p, target, spd, dt, agi)
 
       this.updateStamina(p, moved, dt)

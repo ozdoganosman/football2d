@@ -10,6 +10,7 @@
     "test": "vitest run",
     "sim": "tsx src/headless/sim.ts",
     "simx": "tsx src/headless/simx.ts",
+    "jitter": "tsx src/headless/jitter.ts",
     "pack": "vite build && node scripts/pack.mjs"
   },
   "devDependencies": {
