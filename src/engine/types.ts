@@ -15,6 +15,10 @@ export interface PlayerAttributes {
   positioning: number
   goalkeeping: number
   stamina: number
+  height: number // boy: hava topunda baskın
+  strength: number // güç: hava mücadelesi, topu koruma, fiziksel müdahale
+  heading: number // kafa: kafa vuruşunu yönlendirme/bitirme
+  composure: number // soğukkanlılık: baskı altında bitiricilik ve penaltı
 }
 
 export interface PlayerInfo {
@@ -26,6 +30,15 @@ export interface PlayerInfo {
 
 export type FormationId = '4-4-2' | '4-3-3' | '4-2-3-1' | '3-5-2'
 
+// Takım taktiği: her eksen -1 / 0 / +1. 0 = dengeli (mevcut varsayılan davranış).
+export interface TeamTactics {
+  mentality: number // -1 defansif, 0 dengeli, +1 hücumcu (blok yüksekliği + risk)
+  press: number // -1 alçak blok, 0 orta, +1 yüksek pres (karşılama hattı)
+  width: number // -1 dar, 0 normal, +1 geniş (blok genişliği)
+}
+
+export const BALANCED_TACTICS: TeamTactics = { mentality: 0, press: 0, width: 0 }
+
 export interface TeamInfo {
   name: string
   shortName: string
@@ -34,6 +47,7 @@ export interface TeamInfo {
   formation: FormationId
   starters: PlayerInfo[] // 11 oyuncu, [0] kaleci
   subs: PlayerInfo[]
+  tactics?: TeamTactics // yoksa dengeli
 }
 
 // Formasyon slotu: depth 0 = kendi kale çizgisi, 1 = rakip kale çizgisi; width -1..1
@@ -60,6 +74,7 @@ export type BallState =
       shotQuality?: number
       offside?: boolean // pas anında alıcı ofsayttaydı; varışta düdük çalınır
       hMax?: number // uçuş tepe yüksekliği (m); 0/undefined = yerden pas
+      curl?: number // yalnız şutlarda: yanal falso genliği (m), iki uçta da sıfır
     }
 
 export type RestartKind =
@@ -88,7 +103,8 @@ export interface PlayerSim {
   slotIdx: number
   pos: Vec2
   vel: Vec2 // atalet: ani yön değişimleri yumuşatılır
-  energy: number // 0..1
+  energy: number // 0..1 aerobik kondisyon (maç-boyu yavaş erir)
+  sprintReserve: number // 0..1 anaerobik patlayıcılık (hızlı boşalır/dolar)
   tackleCooldown: number // saniye
   sentOff: boolean
   yellows: number
@@ -101,12 +117,16 @@ export type MatchEventKind =
   | 'interception'
   | 'tackle'
   | 'foul'
+  | 'advantage'
   | 'yellow_card'
   | 'red_card'
   | 'shot_saved'
   | 'shot_missed'
   | 'shot_blocked'
+  | 'woodwork'
+  | 'header'
   | 'goal'
+  | 'own_goal'
   | 'penalty_awarded'
   | 'corner'
   | 'throw_in'
@@ -114,6 +134,10 @@ export type MatchEventKind =
   | 'free_kick'
   | 'offside'
   | 'miscontrol'
+  | 'substitution'
+  | 'injury'
+  | 'extra_time'
+  | 'shootout'
   | 'half_end'
   | 'full_time'
 
@@ -126,6 +150,17 @@ export interface MatchEvent {
   targetId: number // -1 = yok
   scoreHome: number
   scoreAway: number
+  text?: string // hazır yorum/feed metni (örn. oyuncu değişikliği); varsa şablona üstün gelir
+  xg?: number // şut olaylarında bu şutun beklenen gol değeri
+}
+
+// Oyuncu değişikliği kaydı: kare-slot eşlemesi zamandan bağımsız olduğundan,
+// oynatma sırasında hangi anda kimin sahada olduğunu bu kayıtlar belirler.
+export interface SubRecord {
+  tick: number
+  teamIdx: number
+  slotIdx: number
+  inInfo: PlayerInfo
 }
 
 export interface MatchStats {
@@ -140,11 +175,19 @@ export interface MatchStats {
   offsides: [number, number]
   passes: [number, number]
   passesCompleted: [number, number]
+  xg: [number, number] // toplam beklenen gol
 }
 
 export interface HighlightWindow {
   startTick: number
   endTick: number
+}
+
+// Penaltı atışı (seri): hangi takım, kimin vuruşu, gol oldu mu
+export interface ShootoutKick {
+  team: number
+  takerId: number
+  scored: boolean
 }
 
 export interface MatchResult {
@@ -154,5 +197,8 @@ export interface MatchResult {
   stats: MatchStats
   highlights: HighlightWindow[]
   seed: number
-  teams: [TeamInfo, TeamInfo]
+  teams: [TeamInfo, TeamInfo] // İLK ONBİR (starters değişmez); değişiklikler substitutions'ta
+  substitutions: SubRecord[]
+  // Elemeli maçta beraberlik penaltılarla çözülürse: seri skoru ve kazanan
+  shootout?: { score: [number, number]; winner: number; kicks: ShootoutKick[] }
 }

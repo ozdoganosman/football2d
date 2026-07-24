@@ -1,9 +1,12 @@
 import { commentaryFor } from '../commentary/templates'
-import type { MatchEvent, TeamInfo } from '../engine/types'
+import { playerInfoAt } from '../engine/roster'
+import type { MatchEvent, SubRecord, TeamInfo } from '../engine/types'
 
 // Skorboard, yorum bandı, istatistik tablosu ve olay akışı.
 export class Hud {
   private teams: [TeamInfo, TeamInfo]
+  private subs: SubRecord[] = []
+  private events: MatchEvent[] = []
   private score: [number, number] = [0, 0]
   private shots: [number, number] = [0, 0]
   private onTarget: [number, number] = [0, 0]
@@ -12,6 +15,7 @@ export class Hud {
   private yellows: [number, number] = [0, 0]
   private reds: [number, number] = [0, 0]
   private offsides: [number, number] = [0, 0]
+  private xg: [number, number] = [0, 0]
 
   private elScore = document.getElementById('score') as HTMLElement
   private elClock = document.getElementById('clock') as HTMLElement
@@ -24,13 +28,17 @@ export class Hud {
 
   private possession: [number, number] = [50, 50]
 
-  constructor(teams: [TeamInfo, TeamInfo]) {
+  constructor(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = [], events: MatchEvent[] = []) {
     this.teams = teams
-    this.reset(teams)
+    this.subs = subs
+    this.events = events
+    this.reset(teams, subs, events)
   }
 
-  reset(teams: [TeamInfo, TeamInfo]): void {
+  reset(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = [], events: MatchEvent[] = []): void {
     this.teams = teams
+    this.subs = subs
+    this.events = events
     this.score = [0, 0]
     this.shots = [0, 0]
     this.onTarget = [0, 0]
@@ -39,6 +47,7 @@ export class Hud {
     this.yellows = [0, 0]
     this.reds = [0, 0]
     this.offsides = [0, 0]
+    this.xg = [0, 0]
     this.possession = [50, 50]
     this.elHomePlate.textContent = teams[0].name
     this.elAwayPlate.textContent = teams[1].name
@@ -58,12 +67,23 @@ export class Hud {
         this.score = [e.scoreHome, e.scoreAway]
         this.addFeed(e, `GOL! ${this.eventPlayer(e)} (${this.teams[t].shortName})`, 'goal')
         break
+      case 'own_goal':
+        // teamIdx = golü YİYEN değil, sayıyı ALAN takım; playerId = kendi ağına
+        // sokan savunmacı (rakip takımda)
+        this.score = [e.scoreHome, e.scoreAway]
+        this.addFeed(
+          e,
+          `KENDİ KALESİNE GOL! ${this.eventPlayer(e)} (${this.teams[1 - t].shortName})`,
+          'goal',
+        )
+        break
       case 'shot_saved':
         this.shots[t]++
         this.onTarget[t]++
         break
       case 'shot_missed':
       case 'shot_blocked':
+      case 'woodwork':
         this.shots[t]++
         break
       case 'corner':
@@ -71,6 +91,11 @@ export class Hud {
         break
       case 'foul':
         this.fouls[t]++
+        break
+      case 'advantage':
+        // teamIdx = avantajı alan (faule uğrayan) takım; faul rakibinde
+        this.fouls[1 - t]++
+        this.addFeed(e, `Avantaj: ${this.teams[t].name} oynamaya devam`, 'neutral')
         break
       case 'offside':
         this.offsides[t]++
@@ -86,6 +111,18 @@ export class Hud {
       case 'penalty_awarded':
         this.addFeed(e, `Penaltı: ${this.teams[t].name}`, 'goal')
         break
+      case 'substitution':
+        if (e.text) this.addFeed(e, e.text, 'neutral')
+        break
+      case 'injury':
+        if (e.text) this.addFeed(e, e.text, 'yellow')
+        break
+      case 'extra_time':
+        if (e.text) this.addFeed(e, e.text, 'neutral')
+        break
+      case 'shootout':
+        if (e.text) this.addFeed(e, e.text, e.teamIdx === 0 ? 'home' : e.teamIdx === 1 ? 'away' : 'neutral')
+        break
       default:
         break
     }
@@ -94,12 +131,14 @@ export class Hud {
       this.shots[t]++
       this.onTarget[t]++
     }
+    // Beklenen gol: şut olaylarına iliştirilen xG'yi biriktir
+    if (e.xg && t >= 0) this.xg[t] += e.xg
 
     this.renderScore()
     this.renderStats()
 
     if (visible) {
-      const text = commentaryFor(e, this.teams)
+      const text = commentaryFor(e, this.teams, this.subs, this.events)
       if (text) {
         let cls: string = e.teamIdx === 0 ? 'home' : e.teamIdx === 1 ? 'away' : 'neutral'
         if (e.kind === 'goal') cls = 'goal'
@@ -111,8 +150,7 @@ export class Hud {
 
   private eventPlayer(e: MatchEvent): string {
     if (e.playerId < 0) return ''
-    const team = this.teams[Math.floor(e.playerId / 11)]
-    return team.starters[e.playerId % 11]?.name ?? ''
+    return playerInfoAt(this.teams, this.subs, e.playerId, e.tick)?.name ?? ''
   }
 
   private addFeed(e: MatchEvent, text: string, cls: string): void {
@@ -151,6 +189,7 @@ export class Hud {
       ['Topla Oynama %', this.possession[0], this.possession[1]],
       ['Şut', this.shots[0], this.shots[1]],
       ['İsabetli Şut', this.onTarget[0], this.onTarget[1]],
+      ['Beklenen Gol (xG)', this.xg[0].toFixed(2), this.xg[1].toFixed(2)],
       ['Korner', this.corners[0], this.corners[1]],
       ['Ofsayt', this.offsides[0], this.offsides[1]],
       ['Faul', this.fouls[0], this.fouls[1]],

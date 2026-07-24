@@ -4,9 +4,10 @@ import {
   PENALTY_AREA_DEPTH,
   PENALTY_AREA_WIDTH,
 } from './constants'
-import { dribbleSkill, shootSkill } from './attributes'
+import { composureFactor, dribbleSkill, shootSkill } from './attributes'
+import { sharpness } from './stamina'
 import { dist, distToSegment, norm, sub } from './vec'
-import type { PlayerSim, Vec2 } from './types'
+import { BALANCED_TACTICS, type PlayerSim, type TeamTactics, type Vec2 } from './types'
 import type { Rng } from './rng'
 
 export type Decision =
@@ -46,7 +47,18 @@ export function shotQualityAt(
   // Çarpışma tabanı 2.0 m: baskı ölçümü tabandan itibaren sayılır.
   // Taban 0.55: üstü kapatılan oyuncu da şutu "yine de dener" (uzaktan şutlar)
   const pressureFactor = 0.55 + 0.45 * Math.min(1, Math.max(0, (nearest - 1.8) / 5))
-  return distFactor * angleFactor * pressureFactor * shootSkill(shooter.info.attributes)
+  // Yorgun bacak: bitiricilik düşer — yalnız 0.7 enerji altında (gerçekten
+  // yorulmuş oyuncu), üstünde erken/orta maç kalitesi hiç etkilenmez
+  const staminaFactor = shooter.energy >= 0.7 ? 1 : 0.8 + (0.2 * shooter.energy) / 0.7
+  // Soğukkanlılık: bitirici baskı altında daha az harcar (taban nötr)
+  return (
+    distFactor *
+    angleFactor *
+    pressureFactor *
+    staminaFactor *
+    composureFactor(shooter.info.attributes) *
+    shootSkill(shooter.info.attributes)
+  )
 }
 
 const toAttack = (p: Vec2, d: 1 | -1): Vec2 => ({ x: p.x * d, y: p.y * d })
@@ -59,6 +71,10 @@ export function decide(
   attackDir: 1 | -1,
   rng: Rng,
   counter = false, // top yeni kazanıldı: dikine oyna, hızlı bitir
+  tactics: TeamTactics = BALANCED_TACTICS,
+  // İkili paslaşma: bu id'li arkadaş az önce topu bu oyuncuya verip öne
+  // fırladıysa (ver-kaç), geri pas (duvar pası tamamlama) öncelenir.
+  returnToId?: number,
 ): Decision {
   const att = toAttack(carrier.pos, attackDir)
   const myValue = positionValue(att)
@@ -111,7 +127,8 @@ export function decide(
     const recvSpace = Math.min(1, recvMin / 8)
     const progress = positionValue(toAttack(m.pos, attackDir)) - myValue
 
-    const progressW = counter ? 0.6 : 0.48
+    // Taktik mentalite: hücumcu ileri pası daha çok değerler (0 = dengeli)
+    const progressW = (counter ? 0.6 : 0.48) + tactics.mentality * 0.08
     // Koşu yoluna pas: ileri koşan takım arkadaşı değerli bir hedeftir
     const runSpeed = (m.vel.x * attackDir + Math.abs(m.vel.y) * 0.3) / 7
     const runBonus = Math.max(0, Math.min(0.14, runSpeed * 0.14))
@@ -129,10 +146,24 @@ export function decide(
     // Ara pası: ofsayt çizgisine yapışıp İLERİ fırlayan adam derin topun
     // hedefidir — koşu yoluna pas onu hattın arkasına taşır
     if (mAttX > offsideLine - 3 && runSpeed > 0.5) score += 0.03
+    // Duvar pası tamamlama: ver-kaç ortağı öne fırladıysa, geri pas onu
+    // markajından sıyırıp ileride bulur (yol açıksa değerli)
+    if (m.id === returnToId) score += 0.14 * laneOpen
     // Kaleci +1 adamdır: defanstan çıkışta geri pas meşru bir seçenek
     if (m.info.role === 'GK') score -= att.x < -15 ? 0.08 : 0.3
     // Baskı altındayken güvenli (açık) pas cazipleşir
     score += pressure * laneOpen * 0.12
+    // Defanstan çıkışta genişe oyna: taşıyıcı kendi savunma üçte birindeyken
+    // (att.x < -17.5), kendisinden belirgin daha geniş ve geride kalmayan
+    // açık bir arkadaş cazipleşir. positionValue merkezi ödüllediği için
+    // top hep içeriden çıkıyordu; bu terim onu dengeleyip topu kanattan
+    // güvenli çıkarır. Yalnız build-up'a özel — genel oyunu kanada kaydırmaz.
+    if (att.x < -HALF_LENGTH / 3) {
+      const recvWide = Math.abs(m.pos.y)
+      if (recvWide > Math.abs(carrier.pos.y) + 3 && mAttX > att.x - 4) {
+        score += 0.1 * Math.min(1, recvWide / HALF_WIDTH) * laneOpen
+      }
+    }
     options.push({ kind: 'pass', targetId: m.id, score })
   }
 
@@ -142,7 +173,8 @@ export function decide(
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
     if (inBox || quality > 0.1) {
-      const score = quality * 1.35 + (inBox ? 0.18 : 0)
+      // Taktik mentalite: hücumcu takım şutu biraz daha ister (0 = dengeli)
+      const score = quality * 1.35 + (inBox ? 0.18 : 0) + tactics.mentality * 0.05
       options.push({ kind: 'shoot', quality, score })
     }
   }
@@ -221,11 +253,13 @@ export function decide(
     options.push({ kind: 'clear', score: pressure * depthFactor * 0.85 + trapped })
   }
 
-  // Küçük gürültü determinist RNG'den — aynı seed aynı maç
+  // Küçük gürültü determinist RNG'den — aynı seed aynı maç. Yorgun taşıyıcı
+  // daha çok hata yapar: gürültü keskinlik düştükçe büyür (0.7 üstü etkisiz).
+  const noise = 0.045 * (1 + (1 - sharpness(carrier.energy)) * 1.0)
   let best = options[0]
   let bestScore = -Infinity
   for (const opt of options) {
-    const s = opt.score + rng.range(-0.045, 0.045)
+    const s = opt.score + rng.range(-noise, noise)
     if (s > bestScore) {
       bestScore = s
       best = opt

@@ -3,8 +3,9 @@ import type { MatchEvent, MatchResult } from '../engine/types'
 
 export type PlaybackMode = 'highlights' | 'full'
 
-// 1x hızda saniyede izletilen oyun-saniyesi (FM 2D temposuna yakın)
-const BASE_GAME_SECONDS_PER_REAL_SECOND = 3
+// 1x hızda saniyede izletilen oyun-saniyesi. 1.5 = gerçeğe yakın tempo
+// (oyuncular gerçekçi m/s hızında görünür); 2x/4x/8x hızlandırmak için.
+const BASE_GAME_SECONDS_PER_REAL_SECOND = 1.5
 
 export interface PlaybackCallbacks {
   // visible=false: önemli anlar modunda atlanan aralıktaki olay (skor/istatistik

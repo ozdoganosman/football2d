@@ -1,4 +1,5 @@
 import { dribbleSkill, tackleSkill } from './attributes'
+import { sharpness } from './stamina'
 import { dist } from './vec'
 import type { PlayerSim } from './types'
 import type { Rng } from './rng'
@@ -26,7 +27,9 @@ export function attemptTackle(
 
     const t = tackleSkill(def.info.attributes)
     const d = dribbleSkill(carrier.info.attributes)
-    const winP = 0.78 * (t / (t + d))
+    // Yorgun defans mistiming yapar: kazanma olasılığı keskinlikle hafif düşer
+    // (yumuşak — geç maçta savunmayı çökertmeden gerçekçi bir etki)
+    const winP = 0.78 * (t / (t + d)) * (0.75 + 0.25 * sharpness(def.energy))
     if (rng.chance(winP)) {
       return { kind: 'won', tacklerId: def.id, toFeet: rng.chance(0.5) }
     }
