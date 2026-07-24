@@ -18,7 +18,7 @@ let handballs = 0
 let injuries = 0
 let injSubs = 0
 let manDown = 0
-const sums = { shots: [0, 0], onTarget: [0, 0], corners: [0, 0], passAcc: [0, 0] }
+const sums = { shots: [0, 0], onTarget: [0, 0], corners: [0, 0], passAcc: [0, 0], xg: [0, 0] }
 
 const t0 = Date.now()
 for (let m = 0; m < matches; m++) {
@@ -28,6 +28,7 @@ for (let m = 0; m < matches; m++) {
     sums.shots[t] += r.stats.shots[t]
     sums.onTarget[t] += r.stats.shotsOnTarget[t]
     sums.corners[t] += r.stats.corners[t]
+    sums.xg[t] += r.stats.xg[t]
     sums.passAcc[t] += r.stats.passes[t] > 0 ? r.stats.passesCompleted[t] / r.stats.passes[t] : 0
   }
   for (const e of r.events) {
@@ -46,6 +47,7 @@ const avg = (v: number): string => (v / matches).toFixed(2)
 console.log(`\n${matches} maç (${elapsed.toFixed(1)} sn, seed ${baseSeed}..${baseSeed + matches - 1})`)
 console.log(`Gol/maç: ${(totalGoals / matches).toFixed(2)}`)
 console.log(`Şut ${avg(sums.shots[0])}/${avg(sums.shots[1])}  İsabet ${avg(sums.onTarget[0])}/${avg(sums.onTarget[1])}  Korner ${avg(sums.corners[0])}/${avg(sums.corners[1])}`)
+console.log(`xG/maç ${avg(sums.xg[0])}/${avg(sums.xg[1])} (toplam xG ${avg(sums.xg[0] + sums.xg[1])} vs gol ${(totalGoals / matches).toFixed(2)})`)
 console.log(`Pas isabeti %${((sums.passAcc[0] / matches) * 100).toFixed(0)}/%${((sums.passAcc[1] / matches) * 100).toFixed(0)}`)
 console.log(`Uzun taç: ${avg(longThrows)}/maç (${longThrows} toplam)`)
 console.log(`El (handball): ${avg(handballs)}/maç (${handballs} toplam)`)

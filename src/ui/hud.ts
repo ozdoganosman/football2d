@@ -15,6 +15,7 @@ export class Hud {
   private yellows: [number, number] = [0, 0]
   private reds: [number, number] = [0, 0]
   private offsides: [number, number] = [0, 0]
+  private xg: [number, number] = [0, 0]
 
   private elScore = document.getElementById('score') as HTMLElement
   private elClock = document.getElementById('clock') as HTMLElement
@@ -46,6 +47,7 @@ export class Hud {
     this.yellows = [0, 0]
     this.reds = [0, 0]
     this.offsides = [0, 0]
+    this.xg = [0, 0]
     this.possession = [50, 50]
     this.elHomePlate.textContent = teams[0].name
     this.elAwayPlate.textContent = teams[1].name
@@ -123,6 +125,8 @@ export class Hud {
       this.shots[t]++
       this.onTarget[t]++
     }
+    // Beklenen gol: şut olaylarına iliştirilen xG'yi biriktir
+    if (e.xg && t >= 0) this.xg[t] += e.xg
 
     this.renderScore()
     this.renderStats()
@@ -179,6 +183,7 @@ export class Hud {
       ['Topla Oynama %', this.possession[0], this.possession[1]],
       ['Şut', this.shots[0], this.shots[1]],
       ['İsabetli Şut', this.onTarget[0], this.onTarget[1]],
+      ['Beklenen Gol (xG)', this.xg[0].toFixed(2), this.xg[1].toFixed(2)],
       ['Korner', this.corners[0], this.corners[1]],
       ['Ofsayt', this.offsides[0], this.offsides[1]],
       ['Faul', this.fouls[0], this.fouls[1]],

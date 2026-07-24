@@ -149,6 +149,7 @@ export interface MatchEvent {
   scoreHome: number
   scoreAway: number
   text?: string // hazır yorum/feed metni (örn. oyuncu değişikliği); varsa şablona üstün gelir
+  xg?: number // şut olaylarında bu şutun beklenen gol değeri
 }
 
 // Oyuncu değişikliği kaydı: kare-slot eşlemesi zamandan bağımsız olduğundan,
@@ -172,6 +173,7 @@ export interface MatchStats {
   offsides: [number, number]
   passes: [number, number]
   passesCompleted: [number, number]
+  xg: [number, number] // toplam beklenen gol
 }
 
 export interface HighlightWindow {

@@ -53,6 +53,7 @@ import { targetPosition } from './positioning'
 import { decide, shotQualityAt, type Decision } from './decisions'
 import { attemptTackle } from './duels'
 import { resolveShot, type ShotOutcome } from './shooting'
+import { xgFromQuality } from './xg'
 import { moveReferee } from './referee'
 import { add, clampVec, dist, lerp, norm, scale, sub, vec } from './vec'
 import { buildHighlights } from './highlights'
@@ -150,6 +151,8 @@ class MatchSim {
   redCards: [number, number] = [0, 0]
   passesAttempted: [number, number] = [0, 0]
   passesCompleted: [number, number] = [0, 0]
+  xg: [number, number] = [0, 0] // toplam beklenen gol
+  pendingXg = 0 // son şutun xG'si; şut sonucu olayına iliştirilir
   // Oyuncu değişikliği: kalan yedek havuzu, kullanılan hak, açılmış pencere,
   // ve kayıtlar (oynatmada zaman-farkındalıklı isim/numara için)
   benchPool: PlayerInfo[][] = [[], []]
@@ -267,6 +270,19 @@ class MatchSim {
   }
 
   pushEvent(kind: MatchEventKind, teamIdx: number, playerId = -1, targetId = -1, text?: string): void {
+    // Şut sonucu olaylarına o şutun xG'sini iliştir (tek kullanımlık)
+    let xg: number | undefined
+    if (
+      this.pendingXg > 0 &&
+      (kind === 'shot_saved' ||
+        kind === 'shot_missed' ||
+        kind === 'shot_blocked' ||
+        kind === 'woodwork' ||
+        kind === 'goal')
+    ) {
+      xg = this.pendingXg
+      this.pendingXg = 0
+    }
     this.events.push({
       tick: this.tick,
       clock: this.clockDisplay(),
@@ -277,6 +293,7 @@ class MatchSim {
       scoreHome: this.score[0],
       scoreAway: this.score[1],
       text,
+      xg,
     })
   }
 
@@ -1119,6 +1136,11 @@ class MatchSim {
     const dir = this.attackDir[by.teamIdx]
     const keeper = this.keeperOf(1 - by.teamIdx)
 
+    // Beklenen gol: şut GERÇEK kaleciye ulaşırsa geçerli olan değer (resolveShot
+    // zinciriyle birebir → toplam xG gol sayısıyla tutarlı). Bloklanan şut
+    // kaleciye varmadığından düşük xG sayılır. Toplama blok kontrolünden SONRA.
+    const xg = xgFromQuality(quality, keeper && !keeper.sentOff ? gkSkill(keeper.info.attributes) : 0.15)
+
     // Şut anında blok kontrolü — sekmelerle (deflection): blok çoğunlukla topu
     // durdurur; bazen auta sekip KORNER olur, nadiren kaleciyi çalıp devrilerek
     // GOL olur (şutörün golü), çok nadiren kendi ağına döner (kendi kalesine gol).
@@ -1134,6 +1156,10 @@ class MatchSim {
           this.handleHandball(o)
           return
         }
+        // Bloklanan şut kaleciye varmaz: düşük xG (sekme golü nadir)
+        const blockXg = 0.02
+        this.xg[by.teamIdx] += blockXg
+        this.pendingXg = blockXg
         const roll = this.rng.next()
         const nearOwnGoal = dist(o.pos, goal) < 13 // savunmacı kendi kalesine çok yakın
         if (roll < 0.015) {
@@ -1162,6 +1188,10 @@ class MatchSim {
         return
       }
     }
+
+    // Bloklanmadı, kaleciye ulaştı: tam xG'yi say ve sonucuna iliştir
+    this.xg[by.teamIdx] += xg
+    this.pendingXg = xg
 
     const outcome = resolveShot(quality, keeper, this.rng)
     this.pendingShot = outcome
@@ -1292,6 +1322,10 @@ class MatchSim {
         // ya da baraja çarpar (blok → dönen top / korner)
         if (this.rng.chance(0.16)) {
           this.shots[forTeam]++
+          // Baraja çarpan direkt frikik de bir şuttur: xG'sini say/iliştir
+          const fkXg = xgFromQuality(shotQualityAt(taker, att, this.active(1 - forTeam)) * 0.82)
+          this.xg[forTeam] += fkXg
+          this.pendingXg = fkXg
           this.pushEvent('shot_blocked', forTeam, takerId)
           const dir = this.attackDir[forTeam]
           // Baraja çarpan top öne sekip dönen top olur
@@ -3020,6 +3054,7 @@ class MatchSim {
       offsides: [...this.offsides],
       passes: [...this.passesAttempted],
       passesCompleted: [...this.passesCompleted],
+      xg: [this.xg[0], this.xg[1]],
     }
   }
 }
