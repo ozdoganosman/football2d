@@ -277,3 +277,54 @@ body {
     width: 100%;
   }
 }
+
+/* --- Maç analizi overlay --- */
+.hidden {
+  display: none !important;
+}
+
+#analysisOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 20, 8, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+#analysisPanel {
+  background: #143010;
+  border: 1px solid #1d3d18;
+  border-radius: 6px;
+  padding: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  max-width: 96vw;
+  max-height: 94vh;
+}
+
+#analysisBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: #eaf3e2;
+  flex-wrap: wrap;
+}
+
+#analysisBar .muted {
+  margin-left: auto;
+}
+
+#analysisCanvas {
+  display: block;
+  background: #2e6325;
+  border-radius: 4px;
+  max-width: 100%;
+}
+
+.btn.av.active,
+.btn.at.active {
+  background: linear-gradient(#d6f43a, #9fc020);
+  color: #1d3d18;
+}

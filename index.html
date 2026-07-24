@@ -47,6 +47,7 @@
           <option value="highlights">Önemli Anlar</option>
           <option value="full">Tüm Maç</option>
         </select>
+        <button id="btnAnalysis" class="btn">Analiz</button>
         <span class="group">
           <label>Ev:</label>
           <select id="homeFormation" class="sel"></select>
@@ -88,6 +89,26 @@
         <span id="seedInfo" class="muted"></span>
       </div>
     </div>
+
+    <div id="analysisOverlay" class="hidden">
+      <div id="analysisPanel">
+        <div id="analysisBar">
+          <strong>Maç Analizi</strong>
+          <span class="group">
+            <button class="btn av active" data-view="heat">Isı Haritası</button>
+            <button class="btn av" data-view="passes">Pas Ağı</button>
+          </span>
+          <span class="group">
+            <button class="btn at active" data-team="0">Ev</button>
+            <button class="btn at" data-team="1">Dep</button>
+          </span>
+          <span id="analysisLegend" class="muted"></span>
+          <button id="btnAnalysisClose" class="btn primary">Kapat</button>
+        </div>
+        <canvas id="analysisCanvas"></canvas>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

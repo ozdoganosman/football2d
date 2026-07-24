@@ -4,6 +4,7 @@ import { FORMATION_IDS } from './engine/formations'
 import type { FormationId, MatchResult, TeamInfo } from './engine/types'
 import { KIZILKAYA, MAVIDERE } from './data/teams'
 import { Renderer } from './render/renderer'
+import { renderAnalytics, type AnalyticsView } from './render/analytics'
 import { Hud } from './ui/hud'
 import { Playback, type PlaybackMode } from './ui/playback'
 
@@ -22,6 +23,16 @@ const awayPress = tac('awayPress')
 const awayWidth = tac('awayWidth')
 const seedInfo = document.getElementById('seedInfo') as HTMLElement
 const speedButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.btn.speed'))
+
+const btnAnalysis = document.getElementById('btnAnalysis') as HTMLButtonElement
+const analysisOverlay = document.getElementById('analysisOverlay') as HTMLElement
+const analysisCanvas = document.getElementById('analysisCanvas') as HTMLCanvasElement
+const btnAnalysisClose = document.getElementById('btnAnalysisClose') as HTMLButtonElement
+const analysisLegend = document.getElementById('analysisLegend') as HTMLElement
+const viewButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.btn.av'))
+const teamButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.btn.at'))
+let analysisView: AnalyticsView = 'heat'
+let analysisTeam = 0
 
 for (const sel of [homeFormation, awayFormation]) {
   for (const f of FORMATION_IDS) {
@@ -107,6 +118,49 @@ for (const b of speedButtons) {
 modeSel.addEventListener('change', () => {
   playback.setMode(modeSel.value as PlaybackMode)
 })
+
+// --- Maç analizi (ısı haritası / pas ağı) ---
+function drawAnalysis(): void {
+  if (!result) return
+  const box = analysisOverlay.getBoundingClientRect()
+  const w = Math.min(1040, Math.max(600, box.width - 40))
+  const h = Math.round(w * (86 / 117))
+  analysisCanvas.width = w
+  analysisCanvas.height = h
+  renderAnalytics(analysisCanvas, result, analysisView, analysisTeam)
+  const teamName = result.teams[analysisTeam].name
+  analysisLegend.textContent =
+    analysisView === 'heat'
+      ? `${teamName} — top nerede olursa olsun oyuncuların bulunduğu bölgeler (mavi az, kırmızı yoğun)`
+      : `${teamName} — düğüm = ortalama konum (boyu pas hacmi), çizgi = çiftler arası pas sıklığı`
+}
+
+function openAnalysis(): void {
+  analysisOverlay.classList.remove('hidden')
+  drawAnalysis()
+}
+
+btnAnalysis.addEventListener('click', openAnalysis)
+btnAnalysisClose.addEventListener('click', () => analysisOverlay.classList.add('hidden'))
+analysisOverlay.addEventListener('click', (e) => {
+  if (e.target === analysisOverlay) analysisOverlay.classList.add('hidden')
+})
+for (const b of viewButtons) {
+  b.addEventListener('click', () => {
+    viewButtons.forEach((x) => x.classList.remove('active'))
+    b.classList.add('active')
+    analysisView = b.dataset.view as AnalyticsView
+    drawAnalysis()
+  })
+}
+for (const b of teamButtons) {
+  b.addEventListener('click', () => {
+    teamButtons.forEach((x) => x.classList.remove('active'))
+    b.classList.add('active')
+    analysisTeam = Number(b.dataset.team)
+    drawAnalysis()
+  })
+}
 
 window.addEventListener('resize', () => renderer?.resize())
 
