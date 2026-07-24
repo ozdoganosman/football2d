@@ -951,6 +951,18 @@ class MatchSim {
           targets[p.id] = this.fromAttack({ x: -HALF_LENGTH + 22, y: slot.width * 10 }, forTeam)
         }
       }
+      // Kural: kale vuruşunda rakipler ceza sahasına giremez. Kutu içindeki
+      // rakip oyuncular kutu kenarının hemen dışına çıkarılır; kaleci topu
+      // vurunca (executeRestart → open) yeniden serbestçe hareket ederler.
+      const oppTeam = 1 - forTeam
+      const boxEdgeX = -HALF_LENGTH + PENALTY_AREA_DEPTH
+      for (const o of this.active(oppTeam)) {
+        const att = this.toAttack(o.pos, forTeam)
+        if (att.x < boxEdgeX && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2) {
+          const y = Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, att.y))
+          targets[o.id] = this.fromAttack({ x: boxEdgeX + 1.5, y }, forTeam)
+        }
+      }
     } else if (restart === 'throw_in') {
       if (takerId === this.longThrowTaker(spot, forTeam)) {
         // Uzun taç: kutuya yığılma (korner düzeni)
@@ -2094,6 +2106,19 @@ class MatchSim {
       }
       const spd = maxSpeed(p.info.attributes) * energyFactor(p.energy) * 0.85
       this.movePlayer(p, target, spd, dt)
+    }
+    // Kural: kale vuruşunda rakipler ceza sahasına giremez — kutuya giren
+    // rakip her tick kenara itilir (top vurulunca faz 'open' olur, serbest kalırlar)
+    if (this.phase.restart === 'goal_kick') {
+      const forTeam = this.phase.forTeam
+      const boxEdgeX = -HALF_LENGTH + PENALTY_AREA_DEPTH
+      for (const o of this.active(1 - forTeam)) {
+        const att = this.toAttack(o.pos, forTeam)
+        if (att.x < boxEdgeX && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2) {
+          o.pos = this.fromAttack({ x: boxEdgeX + 0.5, y: att.y }, forTeam)
+          o.vel = vec(0, 0)
+        }
+      }
     }
     this.resolveCollisions()
     this.phase.timer--
