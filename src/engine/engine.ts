@@ -440,7 +440,16 @@ class MatchSim {
     const p = this.players[playerId]
     const spot = at ?? (this.ball.kind === 'rolling' ? this.ball.pos : this.ballPos())
     if (p.info.role === 'GK') {
-      this.possess(playerId, spot) // kaleci topu elleriyle alır
+      const gkAtt = this.toAttack(spot, p.teamIdx)
+      const inBox =
+        gkAtt.x < -HALF_LENGTH + PENALTY_AREA_DEPTH && Math.abs(gkAtt.y) < PENALTY_AREA_WIDTH / 2
+      if (inBox) {
+        this.possess(playerId, spot) // ceza sahasında: elle alır
+      } else {
+        // Ceza sahası dışında (sweeper): elle alamaz — ayakla uzağa temizler
+        this.possess(playerId, spot)
+        this.launchClearance(playerId)
+      }
       return
     }
     const ctl = controlSkill(p.info.attributes)
@@ -2241,6 +2250,30 @@ class MatchSim {
           att.x < -HALF_LENGTH + PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
         const engager = this.assignEngager(t, chase, 28, inOwnBox)
         if (engager >= 0) overrides.set(engager, { target: chase, sprint: true })
+
+        // SWEEPER-KECİ: savunma hattının ARKASINA düşen boş topa kaleci çıkıp
+        // süpürür. Top kendi üçte birinde + merkezi + son savunmacıdan daha
+        // derinde ve kaleci hücumcuyla yarışabilecek kadar yakınsa sprint eder.
+        const gk = this.keeperOf(t)
+        if (gk && this.ball.controllerId < 0) {
+          const bAtt = this.toAttack(chase, t)
+          let lastDefX = 0
+          for (const d of this.active(t)) {
+            if (d.info.role === 'GK') continue
+            lastDefX = Math.min(lastDefX, this.toAttack(d.pos, t).x)
+          }
+          const behindLine = bAtt.x < lastDefX - 1
+          const dangerZone = bAtt.x < -HALF_LENGTH + 24 && Math.abs(bAtt.y) < 20
+          if (behindLine && dangerZone) {
+            const gkDist = dist(gk.pos, chase)
+            let nearestAtt = 99
+            for (const o of this.active(1 - t)) nearestAtt = Math.min(nearestAtt, dist(o.pos, chase))
+            // Kaleci topa yetişebilecekse ve rakipten geç kalmayacaksa çık
+            if (gkDist < 17 && gkDist <= nearestAtt + 2.5) {
+              overrides.set(gk.id, { target: chase, sprint: true })
+            }
+          }
+        }
       }
 
       // Yerden pas yolda: alıcı topu karşılamaya koşar, alıcının markajcısı
