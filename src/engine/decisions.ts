@@ -72,6 +72,9 @@ export function decide(
   rng: Rng,
   counter = false, // top yeni kazanıldı: dikine oyna, hızlı bitir
   tactics: TeamTactics = BALANCED_TACTICS,
+  // İkili paslaşma: bu id'li arkadaş az önce topu bu oyuncuya verip öne
+  // fırladıysa (ver-kaç), geri pas (duvar pası tamamlama) öncelenir.
+  returnToId?: number,
 ): Decision {
   const att = toAttack(carrier.pos, attackDir)
   const myValue = positionValue(att)
@@ -143,6 +146,9 @@ export function decide(
     // Ara pası: ofsayt çizgisine yapışıp İLERİ fırlayan adam derin topun
     // hedefidir — koşu yoluna pas onu hattın arkasına taşır
     if (mAttX > offsideLine - 3 && runSpeed > 0.5) score += 0.03
+    // Duvar pası tamamlama: ver-kaç ortağı öne fırladıysa, geri pas onu
+    // markajından sıyırıp ileride bulur (yol açıksa değerli)
+    if (m.id === returnToId) score += 0.14 * laneOpen
     // Kaleci +1 adamdır: defanstan çıkışta geri pas meşru bir seçenek
     if (m.info.role === 'GK') score -= att.x < -15 ? 0.08 : 0.3
     // Baskı altındayken güvenli (açık) pas cazipleşir

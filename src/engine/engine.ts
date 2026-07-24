@@ -101,6 +101,9 @@ class MatchSim {
     modes: ['pocket', 'pocket'],
     until: 0,
   }
+  // İkili paslaşma (ver-kaç / duvar pası): kısa pası atan oyuncu topu
+  // verdikten sonra öne fırlar; alıcı geri pası önceler. Pencere ~2.4 sn.
+  oneTwo: { passerId: number; receiverId: number; team: number; until: number } | null = null
   lastTurnover = { tick: -999, team: -1 } // kontra penceresi takibi
   // Gol sevinci: golden sonra santradan önce kısa kutlama penceresi
   celebrateUntil = -1
@@ -608,6 +611,7 @@ class MatchSim {
     const takerId = this.pickTaker(kind, forTeam, spot)
     this.engagerId = [-1, -1]
     this.passIntent = null
+    this.oneTwo = null
     this.pocketRun = { team: -1, ids: [-1, -1], lanes: [0, 0], modes: ['pocket', 'pocket'], until: 0 }
     this.phase = { kind: 'restart', restart: kind, forTeam, spot: { ...spot }, timer, takerId }
     this.lastTouchTeam = forTeam
@@ -909,6 +913,24 @@ class MatchSim {
     xs.sort((a, b) => a - b)
     const mfLine = xs.length ? xs[Math.floor(xs.length / 2)] : dfLine - 20
     return { mfLine, dfLine, pocket: dfLine - mfLine }
+  }
+
+  // İkili paslaşma kurulumu: açık oyunda kısa, ileri/yana bir pas baskı
+  // altında verildiyse, pası atan oyuncu "ver-kaç" görevini üstlenir —
+  // topu verir vermez markörünün boş yanından öne fırlar (movePlayers
+  // pencere boyunca onu ileri koşturur, alıcı geri pası önceler).
+  maybeSetupOneTwo(by: PlayerSim, to: PlayerSim): void {
+    if (by.info.role === 'GK' || to.info.role === 'GK') return
+    if (dist(by.pos, to.pos) > 20) return // yalnız kısa duvar pası
+    const byAtt = this.toAttack(by.pos, by.teamIdx)
+    const toAtt = this.toAttack(to.pos, by.teamIdx)
+    if (byAtt.x < -8) return // kendi savunmasında ver-kaç kurulmaz
+    if (toAtt.x < byAtt.x - 4) return // geri pasla ver-kaç olmaz
+    // Baskı altında: yakında rakip varsa duvar pası onu geçmek için anlamlı
+    let press = 99
+    for (const o of this.active(1 - by.teamIdx)) press = Math.min(press, dist(o.pos, by.pos))
+    if (press > 7) return
+    this.oneTwo = { passerId: by.id, receiverId: to.id, team: by.teamIdx, until: this.tick + 24 }
   }
 
   // --- uçuş başlatma ---
@@ -1815,6 +1837,15 @@ class MatchSim {
       // Kontra penceresi: top yeni kazanıldıysa hızlı ve dikine oyna
       const counter =
         this.tick - this.lastTurnover.tick < 30 && carrier.teamIdx === this.lastTurnover.team
+      // Ver-kaç geri pası: bu oyuncu az önce bir duvar pasının alıcısıysa
+      // ortağına geri pas öncelenir
+      const returnToId =
+        this.oneTwo &&
+        this.oneTwo.team === carrier.teamIdx &&
+        this.oneTwo.receiverId === carrier.id &&
+        this.tick < this.oneTwo.until
+          ? this.oneTwo.passerId
+          : undefined
       const decision: Decision = decide(
         carrier,
         mates,
@@ -1823,9 +1854,17 @@ class MatchSim {
         this.rng,
         counter,
         this.effTactics[carrier.teamIdx],
+        returnToId,
       )
       this.nextDecisionTick = this.tick + (counter ? 6 : 8)
       if (decision.kind === 'pass') {
+        if (returnToId === decision.targetId) {
+          // Bu pas duvar pasını TAMAMLIYOR: yeni bir ver-kaç kurma, yoksa
+          // iki oyuncu sonsuz geri-pas ping-pongu'na girebilir
+          this.oneTwo = null
+        } else {
+          this.maybeSetupOneTwo(carrier, this.players[decision.targetId])
+        }
         this.launchPass(carrier.id, decision.targetId)
         return
       }
@@ -2444,6 +2483,69 @@ class MatchSim {
           }
           const target = this.fromAttack({ x, y: this.pocketRun.lanes[li] }, runTeam)
           overrides.set(rid, { target, sprint: dist(r.pos, target) > 3 })
+        }
+      }
+    }
+
+    // VER-KAÇ KOŞUSU: duvar pasını atan oyuncu topu verir vermez markörünün
+    // boş yanından öne fırlar (ofsayt çizgisinin gerisinde kalır). Alıcı geri
+    // pası öncelediği için bu, klasik ikili paslaşmayı tamamlar.
+    if (this.oneTwo && this.tick < this.oneTwo.until && (possTeam === this.oneTwo.team || possTeam < 0)) {
+      const passer = this.players[this.oneTwo.passerId]
+      if (!passer.sentOff && passer.id !== carrierId && !overrides.has(passer.id)) {
+        const pAtt = this.toAttack(passer.pos, passer.teamIdx)
+        let marker: PlayerSim | null = null
+        let md = 6
+        for (const o of this.active(1 - passer.teamIdx)) {
+          if (o.info.role === 'GK') continue
+          const dd = dist(o.pos, passer.pos)
+          if (dd < md) {
+            md = dd
+            marker = o
+          }
+        }
+        const line = this.offsideLine(passer.teamIdx)
+        const x = Math.min(pAtt.x + 12, line - 1)
+        let y = pAtt.y
+        if (marker) {
+          const mAtt = this.toAttack(marker.pos, passer.teamIdx)
+          // Markörün boş yanından geç (ondan uzağa açıl)
+          y = pAtt.y + (pAtt.y >= mAtt.y ? 4.5 : -4.5)
+        }
+        y = Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, y))
+        const target = this.fromAttack({ x, y }, passer.teamIdx)
+        overrides.set(passer.id, { target, sprint: dist(passer.pos, target) > 2 })
+      }
+    }
+
+    // BİNDİRME (overlap): taşıyıcı kanatta ve hücum yarısındayken, aynı
+    // kanattan gerideki bir bek dış koridordan öne fırlar — genişlik ve
+    // sayısal fazlalık yaratır, taşıyıcıya boş bir dış çıkış sunar.
+    if (carrierId >= 0 && possTeam >= 0) {
+      const carrier = this.players[carrierId]
+      const cAtt = this.toAttack(carrier.pos, carrier.teamIdx)
+      if (cAtt.x > 4 && Math.abs(cAtt.y) > 16) {
+        const flank = cAtt.y >= 0 ? 1 : -1
+        let back: PlayerSim | null = null
+        let bd = 18
+        for (const m of this.active(carrier.teamIdx)) {
+          if (m.id === carrierId || m.info.role !== 'DF') continue
+          if (overrides.has(m.id)) continue
+          const mAtt = this.toAttack(m.pos, carrier.teamIdx)
+          if ((mAtt.y >= 0 ? 1 : -1) !== flank) continue // aynı kanat
+          if (mAtt.x > cAtt.x - 1) continue // taşıyıcının gerisinde olmalı
+          const dd = dist(m.pos, carrier.pos)
+          if (dd < bd) {
+            bd = dd
+            back = m
+          }
+        }
+        if (back) {
+          const line = this.offsideLine(carrier.teamIdx)
+          const x = Math.min(cAtt.x + 8, line - 1)
+          const y = flank * Math.min(HALF_WIDTH - 2, Math.abs(cAtt.y) + 5) // dıştan sar
+          const target = this.fromAttack({ x, y }, carrier.teamIdx)
+          overrides.set(back.id, { target, sprint: dist(back.pos, target) > 3 })
         }
       }
     }
