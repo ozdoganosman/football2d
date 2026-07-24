@@ -639,6 +639,11 @@ class MatchSim {
       }
       return (best ?? mates[mates.length - 1]).id
     }
+    // Uzun taç: özel atıcı gelir (kutuya fırlatır)
+    if (kind === 'throw_in') {
+      const lt = this.longThrowTaker(spot, forTeam)
+      if (lt >= 0) return lt
+    }
     // taç / korner / serbest vuruş: en yakın saha oyuncusu
     let best: PlayerSim | null = null
     for (const m of mates) {
@@ -658,6 +663,28 @@ class MatchSim {
     if (goalDist < 25 && Math.abs(att.y) < 20) return 'shoot'
     if (att.x > HALF_LENGTH - 32 && goalDist < 46) return 'cross'
     return 'short'
+  }
+
+  // Uzun taç: rakip kale çizgisine yakın (hücum üçte biri) bir taçta, güçlü/uzun
+  // bir atıcı topu doğrudan ceza sahasına fırlatır (korner gibi tehdit).
+  // Uygun atıcının id'sini, yoksa -1 döner. RNG kullanmaz (üç yerde tutarlı).
+  longThrowTaker(spot: Vec2, forTeam: number): number {
+    const att = this.toAttack(spot, forTeam)
+    // Kale çizgisine ~30 m'den yakın taçlar (özel atıcı için erişilebilir mesafe)
+    if (att.x < HALF_LENGTH - 30) return -1
+    let bestId = -1
+    let bestScore = -1
+    for (const p of this.active(forTeam)) {
+      if (p.info.role === 'GK') continue
+      const s = p.info.attributes.strength + p.info.attributes.height * 0.6
+      if (s > bestScore) {
+        bestScore = s
+        bestId = p.id
+      }
+    }
+    // Eşik: sıradan oyuncu ~19, özel uzun atıcı 23+ — yalnız gerçek bir
+    // uzun atıcısı olan takım uzun taç kullanır
+    return bestScore >= 22 ? bestId : -1
   }
 
   // Kutuya yığılma: hücumcuları yakın/uzak direk, penaltı noktası ve kutu
@@ -758,6 +785,48 @@ class MatchSim {
     this.passesAttempted[forTeam]++
   }
 
+  // Uzun taç fırlatması: kutuya düz ve hızlı (korner falsosu yok). Kutu
+  // yığılması loadBox ile kurulmuştur; top yakın direk/penaltı bölgesine iner.
+  longThrowIntoBox(takerId: number, forTeam: number, spot: Vec2): void {
+    const nearSide = Math.sign(this.toAttack(spot, forTeam).y) || 1
+    const landing = clampVec(
+      this.fromAttack(
+        { x: HALF_LENGTH - this.rng.range(6, 11), y: nearSide * this.rng.range(1, 5) },
+        forTeam,
+      ),
+      -HALF_LENGTH + 1,
+      HALF_LENGTH - 1,
+      -HALF_WIDTH + 1,
+      HALF_WIDTH - 1,
+    )
+    const attackers = this.active(forTeam).filter((p) => p.id !== takerId && p.info.role !== 'GK')
+    let target: PlayerSim | null = null
+    let bd = 99
+    for (const p of attackers) {
+      const dd = dist(p.pos, landing)
+      if (dd < bd) {
+        bd = dd
+        target = p
+      }
+    }
+    const d = Math.max(1, dist(spot, landing))
+    this.ball = {
+      kind: 'inFlight',
+      from: { ...spot },
+      to: landing,
+      t: 0,
+      duration: d / 15, // düz ve hızlı hurdle
+      flight: 'cross',
+      byId: takerId,
+      targetId: target?.id ?? null,
+      hMax: 3 + d * 0.04, // korner ortasından daha alçak yay
+      curl: 0,
+    }
+    this.lastTouchTeam = forTeam
+    this.lastTouchId = takerId
+    this.passesAttempted[forTeam]++
+  }
+
   computeRestartTargets(): void {
     if (this.phase.kind !== 'restart') return
     const { restart, forTeam, spot, takerId } = this.phase
@@ -844,15 +913,21 @@ class MatchSim {
         }
       }
     } else if (restart === 'throw_in') {
-      // Taç: yakın iki arkadaş boşa çıkar (biri çizgi boyu ileri, biri içeri)
-      const nearSide = Math.sign(spot.y) || 1
-      const near = this.active(forTeam)
-        .filter((p) => p.id !== takerId && p.info.role !== 'GK')
-        .sort((a, b) => dist(a.pos, spot) - dist(b.pos, spot))
-        .slice(0, 2)
-      const dir = this.attackDir[forTeam]
-      if (near[0]) targets[near[0].id] = { x: spot.x + dir * 6, y: nearSide * (HALF_WIDTH - 6) }
-      if (near[1]) targets[near[1].id] = { x: spot.x - dir * 2, y: nearSide * (HALF_WIDTH - 12) }
+      if (takerId === this.longThrowTaker(spot, forTeam)) {
+        // Uzun taç: kutuya yığılma (korner düzeni)
+        const nearSide = Math.sign(this.toAttack(spot, forTeam).y) || 1
+        this.loadBox(targets, forTeam, takerId, nearSide)
+      } else {
+        // Taç: yakın iki arkadaş boşa çıkar (biri çizgi boyu ileri, biri içeri)
+        const nearSide = Math.sign(spot.y) || 1
+        const near = this.active(forTeam)
+          .filter((p) => p.id !== takerId && p.info.role !== 'GK')
+          .sort((a, b) => dist(a.pos, spot) - dist(b.pos, spot))
+          .slice(0, 2)
+        const dir = this.attackDir[forTeam]
+        if (near[0]) targets[near[0].id] = { x: spot.x + dir * 6, y: nearSide * (HALF_WIDTH - 6) }
+        if (near[1]) targets[near[1].id] = { x: spot.x - dir * 2, y: nearSide * (HALF_WIDTH - 12) }
+      }
     } else if (restart === 'penalty') {
       const defTeam = 1 - forTeam
       const gk = this.keeperOf(defTeam)
@@ -1236,6 +1311,19 @@ class MatchSim {
         return
       }
       // 'short': aşağıdaki kısa pas mantığına düşer
+    }
+
+    if (restart === 'throw_in' && takerId === this.longThrowTaker(spot, forTeam)) {
+      // Uzun taç: kutuya fırlat (kutu loadBox ile yığıldı)
+      this.pushEvent(
+        'throw_in',
+        forTeam,
+        takerId,
+        -1,
+        `Uzun taç! ${this.teams[forTeam].name} topu doğrudan ceza sahasına fırlatıyor`,
+      )
+      this.longThrowIntoBox(takerId, forTeam, spot)
+      return
     }
 
     // taç / kale vuruşu / pas restartı: en uygun yakın takım arkadaşına pas

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "sim": "tsx src/headless/sim.ts",
+    "simx": "tsx src/headless/simx.ts",
     "pack": "vite build && node scripts/pack.mjs"
   },
   "devDependencies": {
