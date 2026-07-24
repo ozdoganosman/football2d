@@ -12,6 +12,7 @@ import {
   F_POSS_TEAM,
   F_REF_X,
   F_REF_Y,
+  ET_SECONDS,
   FRAME_STRIDE,
   HALF_GOAL,
   HALF_LENGTH,
@@ -69,13 +70,17 @@ import type {
   PlayerInfo,
   PlayerSim,
   RestartKind,
+  ShootoutKick,
   SubRecord,
   TeamInfo,
   TeamTactics,
   Vec2,
 } from './types'
 
-const MAX_TICKS = 2 * (HALF_SECONDS + 8 * 60) * TICKS_PER_SEC
+// Normal maç kapasitesi (90' + bol uzatma payı). Elemeli maçta uzatma + penaltı
+// serisi için ek pay: 2×15' uzatma + duraklamalar + seri.
+const REG_MAX_TICKS = 2 * (HALF_SECONDS + 8 * 60) * TICKS_PER_SEC
+const KO_MAX_TICKS = REG_MAX_TICKS + (2 * (ET_SECONDS + 3 * 60) + 8 * 60) * TICKS_PER_SEC
 
 class MatchSim {
   rng: Rng
@@ -117,7 +122,17 @@ class MatchSim {
   freezeUntil = -1 // düdük sonrası herkesin durduğu an
   // Yerden pas niyeti: top fiziksel yuvarlanırken kim kime oynadı
   passIntent: { byId: number; targetId: number; team: number; offside: boolean } | null = null
-  half: 1 | 2 = 1
+  half: 1 | 2 | 3 | 4 = 1 // 1-2 normal, 3-4 uzatma
+  knockout = false // elemeli: beraberlikte uzatma + penaltı serisi
+  // Penaltı serisi durumu (yalnız elemeli maçta 120' beraberliğinde)
+  soActive = false
+  soScore: [number, number] = [0, 0]
+  soKicks: [number, number] = [0, 0] // takım başına atılan penaltı
+  soTeamTurn = 0 // sıradaki vuruşu yapacak takım
+  soOrder: [number[], number[]] = [[], []] // takım başına vurucu sırası (id)
+  soResults: ShootoutKick[] = []
+  soWinner = -1
+  soPin: { id: number; pos: Vec2 }[] = [] // seri sırasında yerinde tutulanlar
   halfClock = 0
   stoppage = 0
   tick = 0
@@ -141,7 +156,8 @@ class MatchSim {
   // normal pozisyon takibinde kalır, sonra bu hedefe sprint override eder.
   keeperDive: { keeperId: number; to: Vec2; readyTick: number } | null = null
   events: MatchEvent[] = []
-  frames = new Float32Array(MAX_TICKS * FRAME_STRIDE)
+  maxTicks = REG_MAX_TICKS
+  frames: Float32Array
   shots: [number, number] = [0, 0]
   shotsOnTarget: [number, number] = [0, 0]
   corners: [number, number] = [0, 0]
@@ -165,8 +181,11 @@ class MatchSim {
   // geride olan öne yüklenir. Her tick güncellenir; motor bunu okur.
   effTactics: [TeamTactics, TeamTactics] = [BALANCED_TACTICS, BALANCED_TACTICS]
 
-  constructor(home: TeamInfo, away: TeamInfo, seed: number) {
+  constructor(home: TeamInfo, away: TeamInfo, seed: number, knockout = false) {
     this.rng = createRng(seed)
+    this.knockout = knockout
+    this.maxTicks = knockout ? KO_MAX_TICKS : REG_MAX_TICKS
+    this.frames = new Float32Array(this.maxTicks * FRAME_STRIDE)
     // Takımları klonla: starters/subs dizileri maç içinde referansla değişebilir;
     // modül sabitlerine (KIZILKAYA/MAVIDERE) sızmamalı. starters DEĞİŞMEZ kalır
     // (ilk onbir); değişiklikler player.info + substitutions kaydında tutulur.
@@ -256,7 +275,10 @@ class MatchSim {
   }
 
   clockDisplay(): number {
-    return this.half === 1 ? this.halfClock : HALF_SECONDS + this.halfClock
+    if (this.half === 1) return this.halfClock
+    if (this.half === 2) return HALF_SECONDS + this.halfClock
+    if (this.half === 3) return 2 * HALF_SECONDS + this.halfClock // uzatma 1 (90'+)
+    return 2 * HALF_SECONDS + ET_SECONDS + this.halfClock // uzatma 2 (105'+)
   }
 
   toAttack(p: Vec2, teamIdx: number): Vec2 {
@@ -1666,6 +1688,12 @@ class MatchSim {
     this.keeperDive = null
     const keeper = this.keeperOf(1 - by.teamIdx)
 
+    // Penaltı serisi: sonucu seri mantığına yönlendir (maç skoru/santra yok)
+    if (this.soActive) {
+      this.resolveShootoutKick(byId, outcome.kind === 'goal')
+      return
+    }
+
     if (outcome.kind === 'goal') {
       this.scoreGoal(byId)
       return
@@ -1819,23 +1847,16 @@ class MatchSim {
     if (this.finished) return
     const dt = TICK_DT
 
-    // Yarı sonu kontrolü (güvenli anda)
+    // Devre sonu kontrolü (güvenli anda; penaltı serisinde atlanır)
+    const periodLen = (this.half <= 2 ? HALF_SECONDS : ET_SECONDS) + this.stoppage
     if (
-      this.halfClock >= HALF_SECONDS + this.stoppage &&
+      !this.soActive &&
+      this.halfClock >= periodLen &&
       this.phase.kind === 'open' &&
       this.ball.kind !== 'inFlight'
     ) {
-      if (this.half === 1) {
-        this.pushEvent('half_end', -1)
-        this.half = 2
-        this.halfClock = 0
-        this.stoppage = 45 + this.rng.int(0, 105)
-        this.attackDir = [-1, 1]
-        this.setupRestart('kickoff', 1, vec(0, 0), 30)
-        this.snapToRestartTargets()
-      } else {
-        this.pushEvent('full_time', -1)
-        this.finished = true
+      this.endOfPeriod()
+      if (this.finished) {
         this.recordFrame()
         return
       }
@@ -1848,6 +1869,8 @@ class MatchSim {
     } else {
       this.stepOpen(dt)
     }
+    // Penaltı serisinde bekleyenler yerinde dursun (kaotik koşuşturma olmasın)
+    if (this.soActive) this.freezeShootoutBystanders()
 
     this.refPos = moveReferee(this.refPos, this.ballPos(), dt)
     for (const p of this.players) {
@@ -1859,8 +1882,170 @@ class MatchSim {
     else if (poss === 1) this.possTicks[1]++
 
     this.recordFrame()
-    this.halfClock += dt
+    if (!this.soActive) this.halfClock += dt // seri sırasında saat donar
     this.tick++
+  }
+
+  // Devre sonu geçişleri: normal maçta 2 devre; elemeli beraberlikte uzatma
+  // (2×15) ve gerekirse penaltı serisi.
+  endOfPeriod(): void {
+    const draw = this.score[0] === this.score[1]
+    if (this.half === 1) {
+      this.pushEvent('half_end', -1)
+      this.half = 2
+      this.halfClock = 0
+      this.stoppage = 45 + this.rng.int(0, 105)
+      this.attackDir = [-1, 1]
+      this.setupRestart('kickoff', 1, vec(0, 0), 30)
+      this.snapToRestartTargets()
+    } else if (this.half === 2) {
+      if (this.knockout && draw) {
+        this.pushEvent('extra_time', -1, -1, -1, 'Skorda eşitlik — uzatma devrelerine gidiliyor')
+        this.half = 3
+        this.halfClock = 0
+        this.stoppage = 15 + this.rng.int(0, 45)
+        this.attackDir = [1, -1]
+        this.setupRestart('kickoff', 0, vec(0, 0), 30)
+        this.snapToRestartTargets()
+      } else {
+        this.pushEvent('full_time', -1)
+        this.finished = true
+      }
+    } else if (this.half === 3) {
+      this.pushEvent('half_end', -1)
+      this.half = 4
+      this.halfClock = 0
+      this.stoppage = 15 + this.rng.int(0, 45)
+      this.attackDir = [-1, 1]
+      this.setupRestart('kickoff', 1, vec(0, 0), 30)
+      this.snapToRestartTargets()
+    } else if (draw) {
+      this.startShootout()
+    } else {
+      this.pushEvent('full_time', -1)
+      this.finished = true
+    }
+  }
+
+  // --- penaltı serisi ---
+
+  startShootout(): void {
+    this.soActive = true
+    this.soScore = [0, 0]
+    this.soKicks = [0, 0]
+    this.soResults = []
+    // Vurucu sırası: saha oyuncuları, bitiricilik×soğukkanlılık en iyi önce
+    for (let t = 0; t < 2; t++) {
+      this.soOrder[t] = this.active(t)
+        .filter((p) => p.info.role !== 'GK')
+        .sort(
+          (a, b) =>
+            shootSkill(b.info.attributes) * composureFactor(b.info.attributes) -
+            shootSkill(a.info.attributes) * composureFactor(a.info.attributes),
+        )
+        .map((p) => p.id)
+    }
+    this.soTeamTurn = this.rng.chance(0.5) ? 0 : 1 // yazı-tura
+    this.pushEvent('shootout', -1, -1, -1, 'Penaltı atışlarına geçiliyor')
+    this.setupShootoutKick()
+  }
+
+  setupShootoutKick(): void {
+    const team = this.soTeamTurn
+    const order = this.soOrder[team]
+    const takerId = order[this.soKicks[team] % order.length]
+    // Vuran takım daima +x kaleye vurur (seri tek kalede oynanır)
+    this.attackDir = team === 0 ? [1, -1] : [-1, 1]
+    const spot = this.fromAttack({ x: HALF_LENGTH - PENALTY_SPOT_DIST, y: 0 }, team)
+    this.engagerId = [-1, -1]
+    this.passIntent = null
+    this.pendingShot = null
+    this.keeperDive = null
+    this.celebrateUntil = -1
+    this.phase = {
+      kind: 'restart',
+      restart: 'penalty',
+      forTeam: team,
+      spot: { ...spot },
+      timer: 40,
+      takerId,
+    }
+    this.lastTouchTeam = team
+    this.lastTouchId = takerId
+    this.computeRestartTargets()
+    this.snapToRestartTargets()
+    // Vuran ve savunan kaleci dışında herkes orta yuvarlağa dizilir (gerçek
+    // seri görünümü) ve orada sabitlenir (freeze). Vuran takım bir yanda,
+    // savunan takım öbür yanda.
+    const defGk = this.keeperOf(1 - team)
+    const keep = new Set<number>([takerId, defGk?.id ?? -1])
+    const waiting = this.players.filter((p) => !p.sentOff && !keep.has(p.id))
+    let ki = 0
+    let di = 0
+    for (const p of waiting) {
+      const kicking = p.teamIdx === team
+      const i = kicking ? ki++ : di++
+      p.pos = {
+        x: -12 + (i % 6) * 4.8,
+        y: (kicking ? -1 : 1) * (12 + Math.floor(i / 6) * 3),
+      }
+      p.vel = vec(0, 0)
+    }
+    this.soPin = waiting.map((p) => ({ id: p.id, pos: { ...p.pos } }))
+  }
+
+  freezeShootoutBystanders(): void {
+    for (const { id, pos } of this.soPin) {
+      const p = this.players[id]
+      p.pos = { x: pos.x, y: pos.y }
+      p.vel = vec(0, 0)
+    }
+  }
+
+  resolveShootoutKick(takerId: number, scored: boolean): void {
+    const team = this.players[takerId].teamIdx
+    this.soResults.push({ team, takerId, scored })
+    if (scored) this.soScore[team]++
+    this.soKicks[team]++
+    const label = this.teams[team].shortName
+    const name = this.players[takerId].info.name
+    this.pushEvent(
+      'shootout',
+      team,
+      takerId,
+      -1,
+      `${scored ? 'GOL' : 'KAÇTI'} — ${name} (${label}) · seri ${this.soScore[0]}-${this.soScore[1]}`,
+    )
+    const winner = this.decideShootout()
+    if (winner >= 0) {
+      this.soWinner = winner
+      this.soActive = false
+      this.ball = { kind: 'rolling', pos: vec(0, 0), vel: vec(0, 0), controllerId: -1 }
+      this.phase = { kind: 'open' }
+      this.pushEvent(
+        'full_time',
+        -1,
+        -1,
+        -1,
+        `Penaltılarda ${this.teams[winner].name} kazandı (${this.soScore[0]}-${this.soScore[1]})`,
+      )
+      this.finished = true
+      return
+    }
+    this.soTeamTurn = 1 - team
+    this.setupShootoutKick()
+  }
+
+  // Kazanan takım (-1 belirsiz): ilk 5'te yenilmez üstünlük ya da ani ölümde fark
+  decideShootout(): number {
+    const [a, b] = this.soScore
+    const [ka, kb] = this.soKicks
+    const remA = Math.max(0, 5 - ka)
+    const remB = Math.max(0, 5 - kb)
+    if (a > b + remB) return 0
+    if (b > a + remA) return 1
+    if (ka >= 5 && kb >= 5 && ka === kb && a !== b) return a > b ? 0 : 1
+    return -1
   }
 
   stepRestart(dt: number): void {
@@ -3063,9 +3248,10 @@ export function simulateMatch(
   home: TeamInfo,
   away: TeamInfo,
   seed: number,
+  knockout = false,
 ): MatchResult {
-  const sim = new MatchSim(home, away, seed)
-  while (!sim.finished && sim.tick < MAX_TICKS - 1) {
+  const sim = new MatchSim(home, away, seed, knockout)
+  while (!sim.finished && sim.tick < sim.maxTicks - 1) {
     sim.step()
   }
   const frameCount = sim.tick + 1
@@ -3078,5 +3264,9 @@ export function simulateMatch(
     seed,
     teams: sim.teams, // ilk onbir (klon; starters değişmez)
     substitutions: sim.substitutions,
+    shootout:
+      sim.soWinner >= 0
+        ? { score: [sim.soScore[0], sim.soScore[1]], winner: sim.soWinner, kicks: sim.soResults }
+        : undefined,
   }
 }

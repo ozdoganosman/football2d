@@ -136,6 +136,8 @@ export type MatchEventKind =
   | 'miscontrol'
   | 'substitution'
   | 'injury'
+  | 'extra_time'
+  | 'shootout'
   | 'half_end'
   | 'full_time'
 
@@ -181,6 +183,13 @@ export interface HighlightWindow {
   endTick: number
 }
 
+// Penaltı atışı (seri): hangi takım, kimin vuruşu, gol oldu mu
+export interface ShootoutKick {
+  team: number
+  takerId: number
+  scored: boolean
+}
+
 export interface MatchResult {
   frames: Float32Array // FRAME_STRIDE × tick sayısı
   frameCount: number
@@ -190,4 +199,6 @@ export interface MatchResult {
   seed: number
   teams: [TeamInfo, TeamInfo] // İLK ONBİR (starters değişmez); değişiklikler substitutions'ta
   substitutions: SubRecord[]
+  // Elemeli maçta beraberlik penaltılarla çözülürse: seri skoru ve kazanan
+  shootout?: { score: [number, number]; winner: number; kicks: ShootoutKick[] }
 }

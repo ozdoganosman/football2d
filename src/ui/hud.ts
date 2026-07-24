@@ -117,6 +117,12 @@ export class Hud {
       case 'injury':
         if (e.text) this.addFeed(e, e.text, 'yellow')
         break
+      case 'extra_time':
+        if (e.text) this.addFeed(e, e.text, 'neutral')
+        break
+      case 'shootout':
+        if (e.text) this.addFeed(e, e.text, e.teamIdx === 0 ? 'home' : e.teamIdx === 1 ? 'away' : 'neutral')
+        break
       default:
         break
     }

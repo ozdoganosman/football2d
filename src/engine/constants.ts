@@ -20,6 +20,7 @@ export const CORNER_ARC_R = 1
 export const TICK_DT = 0.1 // saniye / tick
 export const TICKS_PER_SEC = 10
 export const HALF_SECONDS = 45 * 60
+export const ET_SECONDS = 15 * 60 // uzatma devresi uzunluğu
 
 // Frame kaydı düzeni (Float32Array stride)
 // [clockSec, labelIdx, possTeam, ballX, ballY, refX, refY, possHomeTicks,

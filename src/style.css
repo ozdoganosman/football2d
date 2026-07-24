@@ -268,6 +268,15 @@ body {
   margin-left: auto;
 }
 
+.chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #d8e8cc;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 @media (max-width: 900px) {
   #stage {
     flex-direction: column;

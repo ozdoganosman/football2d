@@ -22,6 +22,7 @@ const awayMentality = tac('awayMentality')
 const awayPress = tac('awayPress')
 const awayWidth = tac('awayWidth')
 const seedInfo = document.getElementById('seedInfo') as HTMLElement
+const knockoutChk = document.getElementById('knockout') as HTMLInputElement
 const speedButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.btn.speed'))
 
 const btnAnalysis = document.getElementById('btnAnalysis') as HTMLButtonElement
@@ -69,11 +70,19 @@ function newMatch(): void {
       width: Number(awayWidth.value),
     },
   }
-  // Seed motor dışında üretilir; motor içinde tek rastgelelik kaynağı seeded RNG'dir
-  const seed = (Math.random() * 0x7fffffff) | 0
+  // Seed URL'den zorlanabilir (?seed=..&ko=1 → tekrarlanabilir/paylaşılabilir maç);
+  // yoksa motor dışında üretilir (motor içinde tek rastgelelik seeded RNG'dir)
+  const params = new URLSearchParams(location.search)
+  const forcedSeed = params.get('seed')
+  const seed = forcedSeed !== null ? Number(forcedSeed) | 0 : (Math.random() * 0x7fffffff) | 0
+  const knockout = knockoutChk.checked || params.get('ko') === '1'
+  if (params.get('ko') === '1') knockoutChk.checked = true
 
-  result = simulateMatch(home, away, seed)
-  seedInfo.textContent = `seed: ${seed} · skor: ${result.stats.goals[0]}-${result.stats.goals[1]}`
+  result = simulateMatch(home, away, seed, knockout)
+  const so = result.shootout
+  seedInfo.textContent =
+    `seed: ${seed} · skor: ${result.stats.goals[0]}-${result.stats.goals[1]}` +
+    (so ? ` (pen. ${so.score[0]}-${so.score[1]})` : '')
 
   if (!renderer) renderer = new Renderer(canvas, result)
   else renderer.setResult(result)
@@ -88,9 +97,19 @@ function newMatch(): void {
       btnPlay.disabled = true
     },
   })
-  playback.playing = true
+  // Belirli bir ana derin bağlantı: ?t=<tick> → o kareye atla, duraklat
+  const tParam = params.get('t')
+  if (tParam !== null) {
+    modeSel.value = 'full'
+    playback.setMode('full')
+    playback.playhead = Math.max(0, Math.min(result.frameCount - 1, Number(tParam) | 0))
+    playback.playing = false
+    btnPlay.textContent = 'Devam'
+  } else {
+    playback.playing = true
+    btnPlay.textContent = 'Duraklat'
+  }
   playback.speedMult = currentSpeed()
-  btnPlay.textContent = 'Duraklat'
   btnPlay.disabled = false
 }
 
