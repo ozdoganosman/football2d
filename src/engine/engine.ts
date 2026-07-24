@@ -1129,6 +1129,11 @@ class MatchSim {
       const oDist = dist(o.pos, from)
       if (oDist < 3 && dist(o.pos, goal) < toGoal && this.rng.chance(0.22)) {
         this.shots[by.teamIdx]++
+        // El: blok bazen kolla olur → penaltı/serbest vuruş (nadir)
+        if (this.rng.chance(0.02)) {
+          this.handleHandball(o)
+          return
+        }
         const roll = this.rng.next()
         const nearOwnGoal = dist(o.pos, goal) < 13 // savunmacı kendi kalesine çok yakın
         if (roll < 0.015) {
@@ -1539,6 +1544,45 @@ class MatchSim {
       const fkTimer = this.freeKickType(spot, victim.teamIdx) === 'short' ? 25 : 42
       this.setupRestart('free_kick', victim.teamIdx, spot, fkTimer)
     }
+  }
+
+  // El: şutu/ortayı kolla kesen savunmacı. Hücum eden taraf yararlanır —
+  // ceza sahasında penaltı, dışında serbest vuruş. (Şut bloğuna bağlı,
+  // gerçekçi: eller çoğu zaman şut keserken devreye girer.)
+  handleHandball(offender: PlayerSim): void {
+    const forTeam = 1 - offender.teamIdx
+    const spot = { ...offender.pos }
+    this.fouls[offender.teamIdx]++
+    this.addStoppage(6)
+    this.freezeUntil = this.tick + 8
+    offender.vel = vec(0, 0)
+    const sn = this.teams[offender.teamIdx].shortName
+    const att = this.toAttack(spot, forTeam)
+    const inBox =
+      att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
+    if (inBox) {
+      this.pushEvent(
+        'penalty_awarded',
+        forTeam,
+        offender.id,
+        -1,
+        `El! ${offender.info.name} (${sn}) ceza sahasında topa elle dokundu — PENALTI!`,
+      )
+      const penSpot = this.fromAttack({ x: HALF_LENGTH - PENALTY_SPOT_DIST, y: 0 }, forTeam)
+      this.setupRestart('penalty', forTeam, penSpot, 55)
+    } else {
+      this.pushEvent(
+        'free_kick',
+        forTeam,
+        offender.id,
+        -1,
+        `El! ${offender.info.name} (${sn}) topa elle dokundu — serbest vuruş`,
+      )
+      const fkTimer = this.freeKickType(spot, forTeam) === 'short' ? 25 : 42
+      this.setupRestart('free_kick', forTeam, spot, fkTimer)
+    }
+    // El ihlalinde bazen kart (bariz gol engelleme kırmızı olabilir — nadir)
+    this.rollFoulCard(offender)
   }
 
   sendOff(p: PlayerSim, straight: boolean): void {
