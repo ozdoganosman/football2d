@@ -46,6 +46,7 @@ export function buildHighlights(events: MatchEvent[], frameCount: number): Highl
         if (e.tick < 5 * S) push(0, e.tick + 8 * S) // maç açılışı
         break
       case 'goal':
+      case 'own_goal':
         push(e.tick - 14 * S, e.tick + 10 * S)
         break
       case 'shot_saved':

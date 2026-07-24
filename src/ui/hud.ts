@@ -62,6 +62,16 @@ export class Hud {
         this.score = [e.scoreHome, e.scoreAway]
         this.addFeed(e, `GOL! ${this.eventPlayer(e)} (${this.teams[t].shortName})`, 'goal')
         break
+      case 'own_goal':
+        // teamIdx = golü YİYEN değil, sayıyı ALAN takım; playerId = kendi ağına
+        // sokan savunmacı (rakip takımda)
+        this.score = [e.scoreHome, e.scoreAway]
+        this.addFeed(
+          e,
+          `KENDİ KALESİNE GOL! ${this.eventPlayer(e)} (${this.teams[1 - t].shortName})`,
+          'goal',
+        )
+        break
       case 'shot_saved':
         this.shots[t]++
         this.onTarget[t]++

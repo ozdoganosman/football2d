@@ -1003,7 +1003,9 @@ class MatchSim {
     const dir = this.attackDir[by.teamIdx]
     const keeper = this.keeperOf(1 - by.teamIdx)
 
-    // Şut anında blok kontrolü
+    // Şut anında blok kontrolü — sekmelerle (deflection): blok çoğunlukla topu
+    // durdurur; bazen auta sekip KORNER olur, nadiren kaleciyi çalıp devrilerek
+    // GOL olur (şutörün golü), çok nadiren kendi ağına döner (kendi kalesine gol).
     const goal = { x: HALF_LENGTH * dir, y: 0 }
     for (const o of this.active(1 - by.teamIdx)) {
       if (o.info.role === 'GK') continue
@@ -1011,7 +1013,28 @@ class MatchSim {
       const oDist = dist(o.pos, from)
       if (oDist < 3 && dist(o.pos, goal) < toGoal && this.rng.chance(0.22)) {
         this.shots[by.teamIdx]++
+        const roll = this.rng.next()
+        const nearOwnGoal = dist(o.pos, goal) < 13 // savunmacı kendi kalesine çok yakın
+        if (roll < 0.015) {
+          // Sekme içeri girdi: kaleye çok yakın savunmacıda bazen kendi
+          // ağına, aksi halde kaleciyi çalarak şutörün golü (ikisi de nadir)
+          if (nearOwnGoal && this.rng.chance(0.3)) this.scoreOwnGoal(o.id)
+          else this.scoreGoal(byId)
+          return
+        }
         this.pushEvent('shot_blocked', by.teamIdx, byId)
+        if (roll < 0.115) {
+          // Sekip kale çizgisinin dışına → korner
+          this.corners[by.teamIdx]++
+          this.pushEvent('corner', by.teamIdx)
+          const spot = {
+            x: dir * (HALF_LENGTH - 0.5),
+            y: Math.sign(o.pos.y || 1) * (HALF_WIDTH - 0.5),
+          }
+          this.setupRestart('corner', by.teamIdx, spot, 30)
+          return
+        }
+        // Normal blok: oyunda kalan sekme
         this.looseBall(o.pos, sub(o.pos, from), this.rng.range(2, 5))
         this.lastTouchTeam = o.teamIdx
         this.lastTouchId = o.id
@@ -1206,6 +1229,17 @@ class MatchSim {
     this.addStoppage(20)
     const conceding = 1 - by.teamIdx
     this.setupRestart('kickoff', conceding, vec(0, 0), 45)
+  }
+
+  // Kendi kalesine gol: skoru RAKİP takıma yazar, olayı topu kendi ağına
+  // sokan savunmacıya bağlar. Santrayı gol yiyen (savunmacının) takımı kullanır.
+  scoreOwnGoal(defenderId: number): void {
+    const def = this.players[defenderId]
+    const scoringTeam = 1 - def.teamIdx
+    this.score[scoringTeam]++
+    this.pushEvent('own_goal', scoringTeam, defenderId)
+    this.addStoppage(20)
+    this.setupRestart('kickoff', def.teamIdx, vec(0, 0), 45)
   }
 
   handleFoul(tacklerId: number, victimId: number): void {

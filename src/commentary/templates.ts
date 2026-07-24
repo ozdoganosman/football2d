@@ -71,6 +71,11 @@ export function commentaryFor(
         `GOOOL!! ${P}'dan muhteşem bir vuruş! Skor ${e.scoreHome}-${e.scoreAway}!`,
         `GOL GELDİ! ${P} skoru ${e.scoreHome}-${e.scoreAway} yapıyor!`,
       ])
+    case 'own_goal':
+      return pick([
+        `KENDİ KALESİNE! ${P} talihsiz bir sekmeyle topu kendi ağına gönderdi! Skor ${e.scoreHome}-${e.scoreAway}`,
+        `Ne talihsizlik! ${P}'dan kendi kalesine gol! ${e.scoreHome}-${e.scoreAway}`,
+      ])
     case 'penalty_awarded':
       return `PENALTI! ${TN} beyaz noktadan yararlanacak`
     case 'corner':

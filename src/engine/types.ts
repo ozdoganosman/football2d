@@ -120,6 +120,7 @@ export type MatchEventKind =
   | 'shot_blocked'
   | 'header'
   | 'goal'
+  | 'own_goal'
   | 'penalty_awarded'
   | 'corner'
   | 'throw_in'
