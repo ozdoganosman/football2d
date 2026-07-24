@@ -25,7 +25,6 @@ import {
 import {
   aerialSkill,
   controlSkill,
-  drainPerMeter,
   dribbleSkill,
   energyFactor,
   gkSkill,
@@ -36,6 +35,15 @@ import {
   shootSkill,
   tackleSkill,
 } from './attributes'
+import {
+  aerobicDrain,
+  aerobicRecover,
+  agilityFactor,
+  energyCeiling,
+  enginePace,
+  sharpness,
+  sprintCap,
+} from './stamina'
 import { FORMATIONS } from './formations'
 import { createRng, type Rng } from './rng'
 import { targetPosition } from './positioning'
@@ -167,6 +175,7 @@ class MatchSim {
           pos: vec(0, 0),
           vel: vec(0, 0),
           energy: 1,
+          sprintReserve: 1,
           tackleCooldown: 0,
           sentOff: false,
           yellows: 0,
@@ -259,6 +268,36 @@ class MatchSim {
     })
   }
 
+  // Organik kondisyon güncellemesi (her tick, oyuncu başına). İki havuz:
+  // aerobik (energy) yavaş erir/toparlanır ve maç-boyu tavana takılır; sprint
+  // rezervi (sprintReserve) yüksek yoğunlukta hızlı boşalır, jog/dinlenmede
+  // hızlı dolar (ama enerjiden çok yukarı çıkamaz — gassed oyuncu üst üste
+  // koşamaz). moved: bu tick katedilen metre.
+  updateStamina(p: PlayerSim, moved: number, dt: number): void {
+    const stam = p.info.attributes.stamina
+    const spdMax = Math.max(1, maxSpeed(p.info.attributes))
+    const intensity = Math.min(1, moved / dt / spdMax) // 0 dururken .. 1 tam sprint
+    const engine = enginePace(p.id)
+    // Aerobik: yoğunluğa göre yak, düşük yoğunlukta topla (tavana kadar)
+    const prog = Math.min(1, this.clockDisplay() / (90 * 60))
+    const ceiling = energyCeiling(prog, stam)
+    let e = p.energy - aerobicDrain(moved, stam, intensity, engine)
+    e += aerobicRecover(stam, intensity, dt)
+    if (e > ceiling) e = Math.max(ceiling, e - dt * 0.0025) // tavan üstü yavaşça iner
+    p.energy = Math.max(0.15, Math.min(1, e))
+    // Sprint rezervi: yalnız SÜRDÜRÜLEN yüksek yoğunlukta boşalır, ara verince
+    // hızlı dolar — normal oyunda çoğunlukla dolu kalır, üst üste sprintte
+    // düşer. Enerjiden ~0.2'den fazla yukarı çıkamaz (bitkin oyuncunun
+    // patlayıcılığı da biter).
+    let r = p.sprintReserve
+    if (intensity > 0.82) {
+      r -= dt * 0.38 * (1.5 - stam / 20) * engine
+    } else {
+      r += dt * (intensity < 0.4 ? 0.6 : 0.28) * (0.7 + stam / 40)
+    }
+    p.sprintReserve = Math.max(0, Math.min(Math.min(1, p.energy + 0.2), r))
+  }
+
   // Skor/zaman farkındalığı: geç maçta (60'+) önde olan takım savunmaya çekilir
   // (mentalite/pres düşer), geride olan öne yüklenir (mentalite/pres artar).
   // Fark büyüdükçe ve süre azaldıkça etki güçlenir. Efektif taktik her tick
@@ -324,6 +363,7 @@ class MatchSim {
       const outInfo = out.info
       out.info = inInfo
       out.energy = 1
+      out.sprintReserve = 1
       out.yellows = 0
       out.tackleCooldown = 0
       out.dribbleDir = null
@@ -405,10 +445,11 @@ class MatchSim {
     const ctl = controlSkill(p.info.attributes)
     // Kolay top (yavaş, yerden, baskısız) neredeyse her zaman temiz alınır;
     // zorluk arttıkça kontrol becerisi belirleyici olur
-    const cleanP = Math.max(
-      0.4,
-      Math.min(0.985, 0.985 - difficulty * 0.65 + (ctl - 0.65) * 0.45),
-    )
+    // Yorgun ayak ilk dokunuşu bozar (yumuşak: 0.7 üstünde etkisiz, altında
+    // hafif — atağı boğmasın diye tam sharpness değil, yarısı uygulanır)
+    const cleanP =
+      Math.max(0.4, Math.min(0.985, 0.985 - difficulty * 0.65 + (ctl - 0.65) * 0.45)) *
+      (0.5 + 0.5 * sharpness(p.energy))
     if (this.rng.chance(cleanP)) {
       this.possess(playerId, spot)
       // Yönlü ilk dokunuş: top ölü durdurulmaz — gidilecek boş yöne açılır
@@ -1802,8 +1843,9 @@ class MatchSim {
           // Kendi kalesini savunan (kale tarafındaki) oyuncuya hafif üstünlük
           const bonus = (p: PlayerSim): number =>
             this.toAttack(p.pos, p.teamIdx).x < -HALF_LENGTH + 24 ? 0.15 : 0
-          const s1 = aerialSkill(p1.info.attributes) + bonus(p1) + this.rng.range(0, 0.5)
-          const s2 = aerialSkill(p2.info.attributes) + bonus(p2) + this.rng.range(0, 0.5)
+          // Yorgun oyuncu az zıplar (keskinlik hava mücadelesini de etkiler)
+          const s1 = aerialSkill(p1.info.attributes) * sharpness(p1.energy) + bonus(p1) + this.rng.range(0, 0.5)
+          const s2 = aerialSkill(p2.info.attributes) * sharpness(p2.energy) + bonus(p2) + this.rng.range(0, 0.5)
           winner = s1 >= s2 ? p1 : p2
         }
         this.resolveHeader(winner, pos)
@@ -2390,15 +2432,20 @@ class MatchSim {
       // Taşıyıcı: topu kovalarken hızlı, ayakta oynarken kısık — vur-kaç
       // ritmi fizikten kendiliğinden doğar
       const carrierFactor = p.id === carrierId ? (sprint ? 0.92 : 0.6) : 1
+      const wantSprint = sprint || far
+      // Sprint rezervi tükendiyse tam sprint hızına ulaşılamaz (üst üste koşma)
+      const cap = wantSprint ? sprintCap(p.sprintReserve) : 1
       const spd =
         maxSpeed(p.info.attributes) *
         energyFactor(p.energy) *
-        (sprint || far ? 1 : 0.7) *
-        carrierFactor
-      const moved = this.movePlayer(p, target, spd, dt, sprint ? 14 : 6)
+        (wantSprint ? 1 : 0.7) *
+        carrierFactor *
+        cap
+      // Çeviklik yorgunlukla düşer: yorgun oyuncu geç döner/hızlanır
+      const agi = (sprint ? 14 : 6) * agilityFactor(p.energy)
+      const moved = this.movePlayer(p, target, spd, dt, agi)
 
-      p.energy = Math.max(0.2, p.energy - moved * drainPerMeter(p.info.attributes))
-      if (moved < 0.1 * dt * spd) p.energy = Math.min(1, p.energy + 0.002 * dt)
+      this.updateStamina(p, moved, dt)
     }
 
     this.resolveCollisions()

@@ -5,6 +5,7 @@ import {
   PENALTY_AREA_WIDTH,
 } from './constants'
 import { dribbleSkill, shootSkill } from './attributes'
+import { sharpness } from './stamina'
 import { dist, distToSegment, norm, sub } from './vec'
 import { BALANCED_TACTICS, type PlayerSim, type TeamTactics, type Vec2 } from './types'
 import type { Rng } from './rng'
@@ -240,11 +241,13 @@ export function decide(
     options.push({ kind: 'clear', score: pressure * depthFactor * 0.85 + trapped })
   }
 
-  // Küçük gürültü determinist RNG'den — aynı seed aynı maç
+  // Küçük gürültü determinist RNG'den — aynı seed aynı maç. Yorgun taşıyıcı
+  // daha çok hata yapar: gürültü keskinlik düştükçe büyür (0.7 üstü etkisiz).
+  const noise = 0.045 * (1 + (1 - sharpness(carrier.energy)) * 1.0)
   let best = options[0]
   let bestScore = -Infinity
   for (const opt of options) {
-    const s = opt.score + rng.range(-0.045, 0.045)
+    const s = opt.score + rng.range(-noise, noise)
     if (s > bestScore) {
       bestScore = s
       best = opt

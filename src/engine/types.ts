@@ -99,7 +99,8 @@ export interface PlayerSim {
   slotIdx: number
   pos: Vec2
   vel: Vec2 // atalet: ani yön değişimleri yumuşatılır
-  energy: number // 0..1
+  energy: number // 0..1 aerobik kondisyon (maç-boyu yavaş erir)
+  sprintReserve: number // 0..1 anaerobik patlayıcılık (hızlı boşalır/dolar)
   tackleCooldown: number // saniye
   sentOff: boolean
   yellows: number
