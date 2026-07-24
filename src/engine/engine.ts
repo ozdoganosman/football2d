@@ -1329,6 +1329,10 @@ class MatchSim {
     }
 
     if (restart === 'penalty') {
+      // Top beyaz noktaya konur: executeRestart faz'ı 'open'a çevirdiği için
+      // launchShot'taki from = ballPos() artık spot'u değil topun konumunu
+      // okur — noktaya koymazsak şut faul yerinden (yan taraftan) çıkar.
+      this.ball = { kind: 'rolling', pos: { ...spot }, vel: vec(0, 0), controllerId: -1 }
       // Soğukkanlı penaltıcı beyaz noktadan daha güvenli: composure çarpanı
       const quality =
         (0.68 + shootSkill(taker.info.attributes) * 0.25) * composureFactor(taker.info.attributes)
