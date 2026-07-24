@@ -3,6 +3,7 @@ import {
   F_BALL_X,
   F_BALL_Y,
   F_DOWN,
+  F_ENERGY,
   F_LABEL,
   F_PLAYERS,
   F_REF_X,
@@ -98,13 +99,14 @@ export class Renderer {
       const isGk = i % 11 === 0
       // İsim/numara zaman-farkındalıklı: o an sahada olan oyuncu (değişiklikler)
       const info = playerInfoAt(result.teams, result.substitutions, i, f0)
+      const energy = this.fv(f0, F_ENERGY + i)
       if (i === downIdx) {
         // Faulle yerde yatan oyuncu: basık elips
         this.drawDownedPlayer(px, py, isGk ? team.gkColor : team.color, info.number)
       } else {
-        this.drawPlayer(px, py, isGk ? team.gkColor : team.color, info.number)
+        this.drawPlayer(px, py, isGk ? team.gkColor : team.color, info.number, energy)
       }
-      if (i === labelIdx) this.drawLabel(px, py, info.name)
+      if (i === labelIdx) this.drawLabel(px, py, info.name, energy)
     }
 
     // Top: konumu artık gerçek fizikten gelir — yapay ofset yok
@@ -113,7 +115,7 @@ export class Renderer {
     this.drawBall(ballX, ballY, 0, 0, ballH)
   }
 
-  private drawPlayer(x: number, y: number, color: string, num: number): void {
+  private drawPlayer(x: number, y: number, color: string, num: number, energy = 1): void {
     const { ctx, cam } = this
     // Yarıçap ~1.0 m: çarpışma tabanı 2.0 m olduğundan daireler en fazla
     // birbirine değer, asla üst üste binmez
@@ -131,6 +133,15 @@ export class Renderer {
     ctx.strokeStyle = '#ffffff'
     ctx.lineWidth = Math.max(1, cam.scale * 0.22)
     ctx.stroke()
+    // Kondisyon halkası: yorgun oyuncuyu belli eder. 0.75 üstünde gizli
+    // (taze), altında yeşil→sarı→kırmızı ince bir yay tam çember çizer.
+    if (energy < 0.75) {
+      ctx.beginPath()
+      ctx.arc(cx, cy, r + cam.scale * 0.32, 0, Math.PI * 2)
+      ctx.strokeStyle = fatigueColor(energy)
+      ctx.lineWidth = Math.max(1.2, cam.scale * 0.26)
+      ctx.stroke()
+    }
     ctx.fillStyle = '#ffffff'
     ctx.font = `bold ${Math.max(7, cam.scale * 1.1)}px Verdana, sans-serif`
     ctx.textAlign = 'center'
@@ -196,7 +207,7 @@ export class Renderer {
     ctx.stroke()
   }
 
-  private drawLabel(x: number, y: number, name: string): void {
+  private drawLabel(x: number, y: number, name: string, energy = 1): void {
     const { ctx, cam } = this
     const cx = wx(cam, x)
     const cy = wy(cam, y) + cam.scale * 2.4
@@ -204,9 +215,26 @@ export class Renderer {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
     const wText = ctx.measureText(name).width
+    // Etiketli oyuncunun kondisyonu: isim altında ince bir enerji çubuğu
+    const barW = Math.max(wText, cam.scale * 4)
     ctx.fillStyle = 'rgba(20, 20, 20, 0.75)'
-    ctx.fillRect(cx - wText / 2 - 3, cy - 1, wText + 6, cam.scale * 1.7 + 2)
+    ctx.fillRect(cx - barW / 2 - 3, cy - 1, barW + 6, cam.scale * 1.7 + cam.scale * 0.6 + 3)
     ctx.fillStyle = '#ffffff'
     ctx.fillText(name, cx, cy)
+    const by = cy + cam.scale * 1.7 + 1
+    const bh = Math.max(2, cam.scale * 0.45)
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'
+    ctx.fillRect(cx - barW / 2, by, barW, bh)
+    ctx.fillStyle = fatigueColor(energy)
+    ctx.fillRect(cx - barW / 2, by, barW * Math.max(0, Math.min(1, energy)), bh)
   }
+}
+
+// Kondisyon rengi: 1.0 canlı yeşil → 0.6 sarı → 0.4 turuncu → 0.2 kırmızı
+function fatigueColor(energy: number): string {
+  const e = Math.max(0, Math.min(1, energy))
+  // yeşil (120°) → kırmızı (0°) arası hue; 0.85+ tam yeşil, 0.3- tam kırmızı
+  const t = Math.max(0, Math.min(1, (e - 0.3) / 0.55))
+  const hue = t * 120
+  return `hsl(${hue}, 85%, 50%)`
 }

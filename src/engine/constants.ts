@@ -23,9 +23,7 @@ export const HALF_SECONDS = 45 * 60
 
 // Frame kaydı düzeni (Float32Array stride)
 // [clockSec, labelIdx, possTeam, ballX, ballY, refX, refY, possHomeTicks,
-//  possAwayTicks, ballHeight, downIdx, 22 × (x, y)]
-export const FRAME_STRIDE = 11 + 22 * 2
-
+//  possAwayTicks, ballHeight, downIdx, 22 × (x, y), 22 × energy]
 export const F_CLOCK = 0
 export const F_LABEL = 1
 export const F_POSS_TEAM = 2
@@ -38,3 +36,5 @@ export const F_POSS_AWAY = 8
 export const F_BALL_H = 9
 export const F_DOWN = 10
 export const F_PLAYERS = 11
+export const F_ENERGY = F_PLAYERS + 22 * 2 // 22 oyuncunun anlık enerjisi (görsel)
+export const FRAME_STRIDE = F_ENERGY + 22

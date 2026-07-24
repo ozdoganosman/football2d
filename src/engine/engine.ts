@@ -4,6 +4,7 @@ import {
   F_BALL_Y,
   F_CLOCK,
   F_DOWN,
+  F_ENERGY,
   F_LABEL,
   F_PLAYERS,
   F_POSS_AWAY,
@@ -2477,6 +2478,7 @@ class MatchSim {
     for (let i = 0; i < 22; i++) {
       f[o + F_PLAYERS + i * 2] = this.players[i].pos.x
       f[o + F_PLAYERS + i * 2 + 1] = this.players[i].pos.y
+      f[o + F_ENERGY + i] = this.players[i].energy
     }
   }
 
