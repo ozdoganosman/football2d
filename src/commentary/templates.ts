@@ -5,6 +5,35 @@ import { playerInfoAt } from '../engine/roster'
 // Olaylardan Türkçe yorum satırları. Deterministik olması için seçim,
 // olayın tick'inden türetilen mini RNG ile yapılır.
 
+// --- Türkçe ek uyumu (ünlü uyumu) ---
+// İsme kesme işaretiyle doğru eki getirir: "Umutlu'nun", "Ertaş'tan",
+// "Kayra'yı" gibi. Son ünlüye göre 2'li (a/e) ve 4'lü (ı/i/u/ü) uyum.
+const VOWELS = new Set('aâeıioöuüAÂEIİOÖUÜ')
+const BACK = new Set('aâıouAÂIOU') // I (noktasız) arka; İ (noktalı) ön
+const ROUND = new Set('oöuüOÖUÜ')
+const VOICELESS = new Set('fstkçşhpFSTKÇŞHP')
+
+function lastVowel(name: string): string {
+  for (let k = name.length - 1; k >= 0; k--) if (VOWELS.has(name[k])) return name[k]
+  return 'e'
+}
+function fourWay(name: string): string {
+  const lv = lastVowel(name)
+  const back = BACK.has(lv)
+  return ROUND.has(lv) ? (back ? 'u' : 'ü') : back ? 'ı' : 'i'
+}
+const twoWay = (name: string): string => (BACK.has(lastVowel(name)) ? 'a' : 'e')
+const endsVowel = (name: string): boolean => VOWELS.has(name[name.length - 1] ?? '')
+const isVoiceless = (name: string): boolean => VOICELESS.has(name[name.length - 1] ?? '')
+
+// -(y)a/-(y)e yönelme; -(y)ı/i/u/ü belirtme; -(n)ın/… tamlayan;
+// -dan/-den(-tan/-ten) ayrılma; -da/-de(-ta/-te) bulunma
+const dat = (n: string): string => (n ? `${n}'${endsVowel(n) ? 'y' : ''}${twoWay(n)}` : '')
+const acc = (n: string): string => (n ? `${n}'${endsVowel(n) ? 'y' : ''}${fourWay(n)}` : '')
+const gen = (n: string): string => (n ? `${n}'${endsVowel(n) ? 'n' : ''}${fourWay(n)}n` : '')
+const abl = (n: string): string => (n ? `${n}'${isVoiceless(n) ? 't' : 'd'}${twoWay(n)}n` : '')
+const loc = (n: string): string => (n ? `${n}'${isVoiceless(n) ? 't' : 'd'}${twoWay(n)}` : '')
+
 function playerName(
   teams: [TeamInfo, TeamInfo],
   subs: SubRecord[],
@@ -71,21 +100,21 @@ export function commentaryFor(
       // Pas çok sık; bir kısmına satır üret
       if (rng.next() < 0.5) return null
       return pick([
-        `${P} topu ${T}'a aktarıyor`,
-        `${P}, ${T}'ı gördü`,
-        `${P} paslaşarak ilerliyor, top ${T}'da`,
+        `${P} topu ${dat(T)} aktarıyor`,
+        `${P}, ${acc(T)} gördü`,
+        `${P} paslaşarak ilerliyor, top ${loc(T)}`,
         `${P} topu ileri taşıyor, adres ${T}`,
       ])
     case 'interception':
       return pick([`${P} araya girdi, top ${TN} takımında`, `${P} pası kesti!`])
     case 'tackle':
-      return pick([`${P}, ${T}'dan topu sıyırdı`, `${P} müdahaleyle topu kazandı`])
+      return pick([`${P}, ${abl(T)} topu sıyırdı`, `${P} müdahaleyle topu kazandı`])
     case 'foul':
       return pick([`${P} faul yaptı, ${T} yerde`, `Hakem düdüğü çaldı: ${P} faulü`])
     case 'advantage':
       return pick([
         `Faul var ama hakem AVANTAJ bıraktı, ${TN} devam ediyor!`,
-        `${P} faul yaptı — hakem oynat dedi, avantaj ${TN}'da!`,
+        `${P} faul yaptı — hakem oynat dedi, avantaj ${loc(TN)}!`,
       ])
     case 'yellow_card':
       return `${P} sarı kart gördü`
@@ -95,18 +124,18 @@ export function commentaryFor(
       const pressing = recentShots(allEvents, e, e.teamIdx, 90) >= 3
       if (veryLate)
         return pick([
-          `SON DAKİKA KURTARIŞI! ${P}'un şutunda ${T} takımını ayakta tuttu!`,
+          `SON DAKİKA KURTARIŞI! ${gen(P)} şutunda ${T} takımını ayakta tuttu!`,
           `${P} beraberliği/galibiyeti bulabilirdi — ${T} müthiş çıktı!`,
         ])
       if (pressing)
         return pick([
           `${TN} baskısını sürdürüyor; ${P} vurdu, ${T} yine kurtardı!`,
-          `Dalga dalga ${TN}! ${P}'un şutunu ${T} çeldi`,
+          `Dalga dalga ${TN}! ${gen(P)} şutunu ${T} çeldi`,
         ])
       return pick([
         `${P} şutunu çekti, kaleci ${T} kurtardı!`,
         `${P} vurdu — ${T} gole izin vermedi!`,
-        `Ne pozisyon! ${P}'un şutunda ${T} kurtardı`,
+        `Ne pozisyon! ${gen(P)} şutunda ${T} kurtardı`,
       ])
     }
     case 'shot_missed':
@@ -117,11 +146,11 @@ export function commentaryFor(
         ])
       return pick([`${P} vurdu, top az farkla dışarı!`, `${P} şansını denedi, isabetsiz`])
     case 'shot_blocked':
-      return pick([`${P}'un şutu savunmaya çarptı`, `${P} vurdu ama şut kapandı`])
+      return pick([`${gen(P)} şutu savunmaya çarptı`, `${P} vurdu ama şut kapandı`])
     case 'woodwork':
       return pick([
-        `DİREK! ${P}'un şutu direğe çarpıp döndü!`,
-        `Az kalsın! ${P}'un vuruşu üst direği yalayıp çıktı!`,
+        `DİREK! ${gen(P)} şutu direğe çarpıp döndü!`,
+        `Az kalsın! ${gen(P)} vuruşu üst direği yalayıp çıktı!`,
         `${P} direği buldu! Ne şanssızlık!`,
       ])
     case 'header':
@@ -150,7 +179,7 @@ export function commentaryFor(
       else lead = `${TN} farkı açıyor, skor ${e.scoreHome}-${e.scoreAway}`
       const base = pick([
         `GOOOL!! ${P} ağları havalandırdı!`,
-        `GOOOL!! ${P}'dan muhteşem bir vuruş!`,
+        `GOOOL!! ${abl(P)} muhteşem bir vuruş!`,
         `GOL GELDİ! ${P} sahneye çıktı!`,
       ])
       return `${base} ${lead}.${braceTag}`
@@ -158,7 +187,7 @@ export function commentaryFor(
     case 'own_goal':
       return pick([
         `KENDİ KALESİNE! ${P} talihsiz bir sekmeyle topu kendi ağına gönderdi! Skor ${e.scoreHome}-${e.scoreAway}`,
-        `Ne talihsizlik! ${P}'dan kendi kalesine gol! ${e.scoreHome}-${e.scoreAway}`,
+        `Ne talihsizlik! ${abl(P)} kendi kalesine gol! ${e.scoreHome}-${e.scoreAway}`,
       ])
     case 'penalty_awarded':
       if (veryLate) return `SON DAKİKA PENALTISI! ${TN} beyaz noktadan tarihi bir şans yakaladı!`
@@ -175,7 +204,7 @@ export function commentaryFor(
     case 'offside':
       return pick([`${P} ofsayt bayrağına takıldı`, `Yan hakem bayrağı kaldırdı: ${P} ofsaytta`])
     case 'miscontrol':
-      return pick([`${P} topu kontrol edemedi!`, `${P}'un ilk dokunuşu kötü, top açıldı`])
+      return pick([`${P} topu kontrol edemedi!`, `${gen(P)} ilk dokunuşu kötü, top açıldı`])
     case 'half_end':
       return `İlk yarı sona erdi: ${teams[0].shortName} ${e.scoreHome}-${e.scoreAway} ${teams[1].shortName}`
     case 'full_time':

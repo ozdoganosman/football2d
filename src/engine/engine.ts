@@ -1164,16 +1164,18 @@ class MatchSim {
     this.pushEvent('pass', by.teamIdx, byId, targetId)
   }
 
-  launchShot(byId: number, quality: number): void {
+  launchShot(byId: number, quality: number, isPenalty = false): void {
     const by = this.players[byId]
     const from = { ...this.ballPos() }
     const dir = this.attackDir[by.teamIdx]
     const keeper = this.keeperOf(1 - by.teamIdx)
 
     // Beklenen gol: şut GERÇEK kaleciye ulaşırsa geçerli olan değer (resolveShot
-    // zinciriyle birebir → toplam xG gol sayısıyla tutarlı). Bloklanan şut
-    // kaleciye varmadığından düşük xG sayılır. Toplama blok kontrolünden SONRA.
-    const xg = xgFromQuality(quality, keeper && !keeper.sentOff ? gkSkill(keeper.info.attributes) : 0.15)
+    // zinciriyle birebir → toplam xG gol sayısıyla tutarlı). Penaltı sabit ~0.76
+    // (gerçekçi penaltı xG'si). Bloklanan şut kaleciye varmadığından düşük xG.
+    const xg = isPenalty
+      ? 0.76
+      : xgFromQuality(quality, keeper && !keeper.sentOff ? gkSkill(keeper.info.attributes) : 0.15)
 
     // Şut anında blok kontrolü — sekmelerle (deflection): blok çoğunlukla topu
     // durdurur; bazen auta sekip KORNER olur, nadiren kaleciyi çalıp devrilerek
@@ -1223,11 +1225,14 @@ class MatchSim {
       }
     }
 
-    // Bloklanmadı, kaleciye ulaştı: tam xG'yi say ve sonucuna iliştir
-    this.xg[by.teamIdx] += xg
-    this.pendingXg = xg
+    // Bloklanmadı, kaleciye ulaştı: tam xG'yi say ve sonucuna iliştir.
+    // Penaltı serisi ayrı bir tiebreak — maç xG/şut istatistiğine yazılmaz.
+    if (!this.soActive) {
+      this.xg[by.teamIdx] += xg
+      this.pendingXg = xg
+    }
 
-    const outcome = resolveShot(quality, keeper, this.rng)
+    const outcome = resolveShot(quality, keeper, this.rng, isPenalty)
     this.pendingShot = outcome
     let targetY: number
     if (outcome.kind === 'missed') {
@@ -1263,7 +1268,7 @@ class MatchSim {
     }
     this.lastTouchTeam = by.teamIdx
     this.lastTouchId = byId
-    this.shots[by.teamIdx]++
+    if (!this.soActive) this.shots[by.teamIdx]++ // seri şutları maç istatistiğine girmez
 
     // Kaleci şutu okur ve varış noktasına atlar: iyi kaleci / zayıf şut daha
     // hızlı tepki alır, sert/kaliteli şutta reaksiyon payı daralır
@@ -1348,7 +1353,7 @@ class MatchSim {
       // Soğukkanlı penaltıcı beyaz noktadan daha güvenli: composure çarpanı
       const quality =
         (0.68 + shootSkill(taker.info.attributes) * 0.25) * composureFactor(taker.info.attributes)
-      this.launchShot(takerId, Math.min(0.96, quality))
+      this.launchShot(takerId, Math.min(0.96, quality), true)
       return
     }
 
@@ -2510,29 +2515,39 @@ class MatchSim {
         }
       }
       if (p1) {
-        // Rakip taraftan en yakın rakip: ikili hava mücadelesi
+        // En yakın rakip: <1.9 m ikili hava mücadelesi (p2), <4.5 m ise baskı
+        // (kafayla ilk dokunuş meşru). Daha uzaksa rakipsiz sayılır.
         let p2: PlayerSim | null = null
         let d2 = 1.9
+        let nearestOpp = 99
         for (const o of this.active(1 - p1.teamIdx)) {
           if (o.info.role === 'GK') continue
           const dd = dist(o.pos, pos)
+          if (dd < nearestOpp) nearestOpp = dd
           if (dd < d2) {
             d2 = dd
             p2 = o
           }
         }
-        let winner = p1
-        if (p2) {
-          // Kendi kalesini savunan (kale tarafındaki) oyuncuya hafif üstünlük
-          const bonus = (p: PlayerSim): number =>
-            this.toAttack(p.pos, p.teamIdx).x < -HALF_LENGTH + 24 ? 0.15 : 0
-          // Yorgun oyuncu az zıplar (keskinlik hava mücadelesini de etkiler)
-          const s1 = aerialSkill(p1.info.attributes) * sharpness(p1.energy) + bonus(p1) + this.rng.range(0, 0.5)
-          const s2 = aerialSkill(p2.info.attributes) * sharpness(p2.energy) + bonus(p2) + this.rng.range(0, 0.5)
-          winner = s1 >= s2 ? p1 : p2
+        // Rakipsiz (baskısız) + savunma bölgesi dışındaki topu kafalama YOK:
+        // oyuncu YERDEN kontrol etsin (top inmeye devam eder, first-touch
+        // devralır) — gereksiz zincirleme kafa mücadelesi (ping-pong) azalır.
+        const p1Att = this.toAttack(p1.pos, p1.teamIdx)
+        const defending = p1Att.x < -HALF_LENGTH + 24
+        if (nearestOpp < 4.5 || defending) {
+          let winner = p1
+          if (p2) {
+            // Kendi kalesini savunan (kale tarafındaki) oyuncuya hafif üstünlük
+            const bonus = (p: PlayerSim): number =>
+              this.toAttack(p.pos, p.teamIdx).x < -HALF_LENGTH + 24 ? 0.15 : 0
+            // Yorgun oyuncu az zıplar (keskinlik hava mücadelesini de etkiler)
+            const s1 = aerialSkill(p1.info.attributes) * sharpness(p1.energy) + bonus(p1) + this.rng.range(0, 0.5)
+            const s2 = aerialSkill(p2.info.attributes) * sharpness(p2.energy) + bonus(p2) + this.rng.range(0, 0.5)
+            winner = s1 >= s2 ? p1 : p2
+          }
+          this.resolveHeader(winner, pos)
+          return
         }
-        this.resolveHeader(winner, pos)
-        return
       }
     }
 
