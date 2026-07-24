@@ -25,10 +25,12 @@ import {
 } from './constants'
 import {
   aerialSkill,
+  composureFactor,
   controlSkill,
   dribbleSkill,
   energyFactor,
   gkSkill,
+  headingSkill,
   interceptSkill,
   maxSpeed,
   passErrorRate,
@@ -100,6 +102,12 @@ class MatchSim {
     until: 0,
   }
   lastTurnover = { tick: -999, team: -1 } // kontra penceresi takibi
+  // Gol sevinci: golden sonra santradan önce kısa kutlama penceresi
+  celebrateUntil = -1
+  celebrateTeam = -1
+  celebrateScorerId = -1
+  celebrateCorner: Vec2 = vec(0, 0)
+  celebrateSnapped = false
   downedId = -1 // faulle yerde kalan oyuncu
   downedUntil = -1
   freezeUntil = -1 // düdük sonrası herkesin durduğu an
@@ -846,8 +854,10 @@ class MatchSim {
       const gk = this.keeperOf(defTeam)
       const goalX = HALF_LENGTH * this.attackDir[forTeam]
       if (gk) targets[gk.id] = { x: goalX - this.attackDir[forTeam] * 0.8, y: 0 }
+      // Penaltıcı topun ~5 m gerisinde bekler (koşu başlangıcı); son anda
+      // topa koşar (bkz. stepRestart penaltı koşusu)
       targets[takerId] = {
-        x: spot.x - 2 * this.attackDir[forTeam],
+        x: spot.x - 5 * this.attackDir[forTeam],
         y: spot.y,
       }
       // Diğerleri: penaltı yayının gerisinde (kutu + nokta dışında), dönen topa
@@ -1135,6 +1145,7 @@ class MatchSim {
     const { restart, forTeam, spot, takerId } = this.phase
     this.phase = { kind: 'open' }
     this.restartTargets = []
+    this.celebrateUntil = -1 // kutlama durumu temizlenir
     const taker = this.players[takerId]
     // Kullanıcı zaten yürüyerek geldi; en fazla küçük bir düzeltme olur
     if (dist(taker.pos, spot) > 2.5) taker.pos = { ...spot }
@@ -1164,8 +1175,10 @@ class MatchSim {
     }
 
     if (restart === 'penalty') {
-      const quality = 0.68 + shootSkill(taker.info.attributes) * 0.25
-      this.launchShot(takerId, Math.min(0.95, quality))
+      // Soğukkanlı penaltıcı beyaz noktadan daha güvenli: composure çarpanı
+      const quality =
+        (0.68 + shootSkill(taker.info.attributes) * 0.25) * composureFactor(taker.info.attributes)
+      this.launchShot(takerId, Math.min(0.96, quality))
       return
     }
 
@@ -1237,6 +1250,7 @@ class MatchSim {
     this.pushEvent('goal', by.teamIdx, byId)
     this.addStoppage(20)
     const conceding = 1 - by.teamIdx
+    this.startCelebration(by.teamIdx, byId)
     this.setupRestart('kickoff', conceding, vec(0, 0), 45)
   }
 
@@ -1248,7 +1262,46 @@ class MatchSim {
     this.score[scoringTeam]++
     this.pushEvent('own_goal', scoringTeam, defenderId)
     this.addStoppage(20)
+    this.startCelebration(scoringTeam, -1) // kendi kalesine golde belirli golcü yok
     this.setupRestart('kickoff', def.teamIdx, vec(0, 0), 45)
+  }
+
+  // Gol sevinci penceresini kur: golcü köşe bayrağına koşar, takım arkadaşları
+  // onu kovalar; santra bu pencereden sonra başlar (temiz reset ile).
+  startCelebration(team: number, scorerId: number): void {
+    this.celebrateTeam = team
+    this.celebrateScorerId = scorerId
+    this.celebrateSnapped = false
+    this.celebrateUntil = this.tick + 55 // ~5.5 sn seremonik kutlama
+    const dir = this.attackDir[team]
+    const ref = scorerId >= 0 ? this.players[scorerId].pos : vec(dir * 30, 0)
+    // Golün atıldığı taraftaki köşe bayrağına doğru koşu
+    this.celebrateCorner = {
+      x: dir * (HALF_LENGTH - 4),
+      y: Math.sign(ref.y || (this.tick % 2 ? 1 : -1)) * (HALF_WIDTH - 4),
+    }
+  }
+
+  // Kutlama adımı: golcü köşeye, takım arkadaşları golcüye koşar; gol yiyen
+  // takım yavaşça durur (hayal kırıklığı). Santra bittiğinde temiz reset olur.
+  stepCelebration(dt: number): void {
+    const scorer = this.celebrateScorerId >= 0 ? this.players[this.celebrateScorerId] : null
+    for (const p of this.active()) {
+      if (p.id === this.downedId && this.tick < this.downedUntil) {
+        p.vel = vec(0, 0)
+        continue
+      }
+      if (p.teamIdx === this.celebrateTeam) {
+        const target =
+          scorer && p.id !== scorer.id ? scorer.pos : this.celebrateCorner
+        this.movePlayer(p, target, maxSpeed(p.info.attributes) * 0.8, dt, 8)
+      } else {
+        // gol yiyen: yavaşlayıp durur
+        p.vel = scale(p.vel, 0.82)
+        p.pos = add(p.pos, scale(p.vel, dt))
+      }
+    }
+    this.resolveCollisions()
   }
 
   // Faul kart zarları (avantajda da uygulanır — kart avantajdan bağımsızdır)
@@ -1286,10 +1339,13 @@ class MatchSim {
     if (inBox) {
       this.pushEvent('penalty_awarded', victim.teamIdx, victimId)
       const penSpot = this.fromAttack({ x: HALF_LENGTH - PENALTY_SPOT_DIST, y: 0 }, victim.teamIdx)
-      this.setupRestart('penalty', victim.teamIdx, penSpot, 40)
+      this.setupRestart('penalty', victim.teamIdx, penSpot, 55) // seremoni için uzun
     } else {
       this.pushEvent('free_kick', victim.teamIdx, victimId)
-      this.setupRestart('free_kick', victim.teamIdx, spot, 25)
+      // Tehlikeli (şut/orta) serbest vuruşta baraj/dizilim oturması için uzun
+      // süre; derin/kısa olanlar hızlı alınır
+      const fkTimer = this.freeKickType(spot, victim.teamIdx) === 'short' ? 25 : 42
+      this.setupRestart('free_kick', victim.teamIdx, spot, fkTimer)
     }
   }
 
@@ -1450,7 +1506,10 @@ class MatchSim {
     const inShootZone =
       att.x > HALF_LENGTH - 18 && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2 + 2
     if (inShootZone) {
-      const q = shotQualityAt(winner, att, this.active(1 - team)) * 0.68
+      // Kafa vuruşu kalitesi kafa/boy becerisine bağlı: iyi kafa vuran
+      // (uzun santrafor) tehlikeli, kötüsü zararsız
+      const headF = 0.45 + headingSkill(winner.info.attributes) * 0.4
+      const q = shotQualityAt(winner, att, this.active(1 - team)) * headF
       if (q > 0.02) {
         this.launchShot(winner.id, q)
         return
@@ -1536,10 +1595,26 @@ class MatchSim {
 
   stepRestart(dt: number): void {
     if (this.phase.kind !== 'restart') return
+    // Gol sevinci: santradan önce kısa kutlama; kutlama boyunca restart timer'ı
+    // dondurulur. Kutlama bitince temiz reset (herkes kendi yarısına) + kısa
+    // bir bekleme sonrası santra vuruşu — böylece santra net görünür.
+    if (this.tick < this.celebrateUntil) {
+      this.stepCelebration(dt)
+      return
+    }
+    if (this.celebrateUntil >= 0 && !this.celebrateSnapped) {
+      this.snapToRestartTargets()
+      this.celebrateSnapped = true
+      this.phase.timer = 10 // reset sonrası kısa bekleme, sonra vuruş
+    }
     // Düdük anı: kısa bir donma — faul/penaltı algılanabilir olur
     if (this.tick < this.freezeUntil) {
       this.phase.timer--
       return
+    }
+    // Penaltı koşusu: son ~12 tick'te penaltıcı topa doğru koşar (seremoni)
+    if (this.phase.restart === 'penalty' && this.phase.timer < 12) {
+      this.restartTargets[this.phase.takerId] = { ...this.phase.spot }
     }
     for (const p of this.active()) {
       if (p.id === this.downedId && this.tick < this.downedUntil) {

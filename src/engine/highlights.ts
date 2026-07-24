@@ -43,23 +43,29 @@ export function buildHighlights(events: MatchEvent[], frameCount: number): Highl
   for (const e of events) {
     switch (e.kind) {
       case 'kickoff':
-        if (e.tick < 5 * S) push(0, e.tick + 8 * S) // maç açılışı
+        // Tüm santralar gösterilir (açılış + devre başı; golden sonrakiler
+        // zaten gol penceresinde). Golcü santrada oyunun yeniden başlayışı
+        // izlenir.
+        push(e.tick - 3 * S, e.tick + 7 * S)
         break
       case 'goal':
       case 'own_goal':
-        push(e.tick - 14 * S, e.tick + 10 * S)
+        // Golden önce + tüm gol sevinci + temiz santra: geniş pencere
+        push(e.tick - 13 * S, e.tick + 19 * S)
         break
       case 'shot_saved':
       case 'shot_missed':
       case 'shot_blocked':
       case 'woodwork':
-        push(e.tick - 11 * S, e.tick + 4 * S)
+        // 13 sn öncesi: serbest vuruş/korner seremonisi de görünür
+        push(e.tick - 13 * S, e.tick + 4 * S)
         break
       case 'penalty_awarded':
-        push(e.tick - 8 * S, e.tick + 12 * S)
+        // Penaltı seremonisi + vuruş + sonrası tam görünür
+        push(e.tick - 8 * S, e.tick + 19 * S)
         break
       case 'corner':
-        push(e.tick - 4 * S, e.tick + 12 * S)
+        push(e.tick - 4 * S, e.tick + 13 * S)
         break
       case 'yellow_card':
       case 'red_card':

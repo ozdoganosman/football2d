@@ -15,6 +15,10 @@ export interface PlayerAttributes {
   positioning: number
   goalkeeping: number
   stamina: number
+  height: number // boy: hava topunda baskın
+  strength: number // güç: hava mücadelesi, topu koruma, fiziksel müdahale
+  heading: number // kafa: kafa vuruşunu yönlendirme/bitirme
+  composure: number // soğukkanlılık: baskı altında bitiricilik ve penaltı
 }
 
 export interface PlayerInfo {

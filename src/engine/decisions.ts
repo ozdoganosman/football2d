@@ -4,7 +4,7 @@ import {
   PENALTY_AREA_DEPTH,
   PENALTY_AREA_WIDTH,
 } from './constants'
-import { dribbleSkill, shootSkill } from './attributes'
+import { composureFactor, dribbleSkill, shootSkill } from './attributes'
 import { sharpness } from './stamina'
 import { dist, distToSegment, norm, sub } from './vec'
 import { BALANCED_TACTICS, type PlayerSim, type TeamTactics, type Vec2 } from './types'
@@ -50,8 +50,14 @@ export function shotQualityAt(
   // Yorgun bacak: bitiricilik düşer — yalnız 0.7 enerji altında (gerçekten
   // yorulmuş oyuncu), üstünde erken/orta maç kalitesi hiç etkilenmez
   const staminaFactor = shooter.energy >= 0.7 ? 1 : 0.8 + (0.2 * shooter.energy) / 0.7
+  // Soğukkanlılık: bitirici baskı altında daha az harcar (taban nötr)
   return (
-    distFactor * angleFactor * pressureFactor * staminaFactor * shootSkill(shooter.info.attributes)
+    distFactor *
+    angleFactor *
+    pressureFactor *
+    staminaFactor *
+    composureFactor(shooter.info.attributes) *
+    shootSkill(shooter.info.attributes)
   )
 }
 
