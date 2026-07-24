@@ -6,6 +6,7 @@ import type { MatchEvent, SubRecord, TeamInfo } from '../engine/types'
 export class Hud {
   private teams: [TeamInfo, TeamInfo]
   private subs: SubRecord[] = []
+  private events: MatchEvent[] = []
   private score: [number, number] = [0, 0]
   private shots: [number, number] = [0, 0]
   private onTarget: [number, number] = [0, 0]
@@ -26,15 +27,17 @@ export class Hud {
 
   private possession: [number, number] = [50, 50]
 
-  constructor(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = []) {
+  constructor(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = [], events: MatchEvent[] = []) {
     this.teams = teams
     this.subs = subs
-    this.reset(teams, subs)
+    this.events = events
+    this.reset(teams, subs, events)
   }
 
-  reset(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = []): void {
+  reset(teams: [TeamInfo, TeamInfo], subs: SubRecord[] = [], events: MatchEvent[] = []): void {
     this.teams = teams
     this.subs = subs
+    this.events = events
     this.score = [0, 0]
     this.shots = [0, 0]
     this.onTarget = [0, 0]
@@ -125,7 +128,7 @@ export class Hud {
     this.renderStats()
 
     if (visible) {
-      const text = commentaryFor(e, this.teams, this.subs)
+      const text = commentaryFor(e, this.teams, this.subs, this.events)
       if (text) {
         let cls: string = e.teamIdx === 0 ? 'home' : e.teamIdx === 1 ? 'away' : 'neutral'
         if (e.kind === 'goal') cls = 'goal'

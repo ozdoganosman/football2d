@@ -15,10 +15,41 @@ function playerName(
   return playerInfoAt(teams, subs, id, tick)?.name ?? ''
 }
 
+// Golcünün bu maçtaki kaçıncı golü (kendi kalesine goller sayılmaz)
+function scorerGoalNumber(allEvents: MatchEvent[], e: MatchEvent): number {
+  let n = 0
+  for (const ev of allEvents) {
+    if (ev.tick > e.tick) break
+    if (ev.kind === 'goal' && ev.playerId === e.playerId && ev.teamIdx === e.teamIdx) n++
+  }
+  return n
+}
+
+// Takımın son `winSec` saniyedeki şut sayısı (baskı/momentum ölçümü)
+function recentShots(allEvents: MatchEvent[], e: MatchEvent, team: number, winSec: number): number {
+  let n = 0
+  const from = e.tick - winSec * 10
+  for (const ev of allEvents) {
+    if (ev.tick > e.tick) break
+    if (ev.tick < from) continue
+    if (ev.teamIdx !== team) continue
+    if (
+      ev.kind === 'goal' ||
+      ev.kind === 'shot_saved' ||
+      ev.kind === 'shot_missed' ||
+      ev.kind === 'shot_blocked' ||
+      ev.kind === 'woodwork'
+    )
+      n++
+  }
+  return n
+}
+
 export function commentaryFor(
   e: MatchEvent,
   teams: [TeamInfo, TeamInfo],
   subs: SubRecord[] = [],
+  allEvents: MatchEvent[] = [],
 ): string | null {
   // Hazır metin (örn. oyuncu değişikliği) varsa doğrudan onu kullan
   if (e.text) return e.text
@@ -28,6 +59,10 @@ export function commentaryFor(
   const T = playerName(teams, subs, e.targetId, e.tick)
   const team = e.teamIdx >= 0 ? teams[e.teamIdx] : null
   const TN = team?.name ?? ''
+  // Bağlam: geç maç, skor farkı (olayı yapan takım açısından)
+  const late = e.clock >= 82 * 60
+  const veryLate = e.clock >= 89 * 60
+  const diff = e.teamIdx === 0 ? e.scoreHome - e.scoreAway : e.scoreAway - e.scoreHome
 
   switch (e.kind) {
     case 'kickoff':
@@ -56,13 +91,30 @@ export function commentaryFor(
       return `${P} sarı kart gördü`
     case 'red_card':
       return `KIRMIZI KART! ${P} oyun dışı!`
-    case 'shot_saved':
+    case 'shot_saved': {
+      const pressing = recentShots(allEvents, e, e.teamIdx, 90) >= 3
+      if (veryLate)
+        return pick([
+          `SON DAKİKA KURTARIŞI! ${P}'un şutunda ${T} takımını ayakta tuttu!`,
+          `${P} beraberliği/galibiyeti bulabilirdi — ${T} müthiş çıktı!`,
+        ])
+      if (pressing)
+        return pick([
+          `${TN} baskısını sürdürüyor; ${P} vurdu, ${T} yine kurtardı!`,
+          `Dalga dalga ${TN}! ${P}'un şutunu ${T} çeldi`,
+        ])
       return pick([
         `${P} şutunu çekti, kaleci ${T} kurtardı!`,
         `${P} vurdu — ${T} gole izin vermedi!`,
         `Ne pozisyon! ${P}'un şutunda ${T} kurtardı`,
       ])
+    }
     case 'shot_missed':
+      if (diff < 0 && late)
+        return pick([
+          `${P} kaçırdı! ${TN} geriye düşmüşken bu büyük fırsattı`,
+          `Işıl ışıl fırsat! ${P} skoru düzeltemedi`,
+        ])
       return pick([`${P} vurdu, top az farkla dışarı!`, `${P} şansını denedi, isabetsiz`])
     case 'shot_blocked':
       return pick([`${P}'un şutu savunmaya çarptı`, `${P} vurdu ama şut kapandı`])
@@ -76,19 +128,42 @@ export function commentaryFor(
       return rng.next() < 0.45
         ? null
         : pick([`${P} kafayı vurdu!`, `${P} yükseldi, kafa vuruşu!`, `Havada ${P} kazandı`])
-    case 'goal':
-      return pick([
-        `GOOOL!! ${P} ağları havalandırdı! ${TN} ${e.scoreHome}-${e.scoreAway} yaptı!`,
-        `GOOOL!! ${P}'dan muhteşem bir vuruş! Skor ${e.scoreHome}-${e.scoreAway}!`,
-        `GOL GELDİ! ${P} skoru ${e.scoreHome}-${e.scoreAway} yapıyor!`,
+    case 'goal': {
+      const num = scorerGoalNumber(allEvents, e)
+      const braceTag =
+        num === 2
+          ? ` ${P} bu maçtaki ikinci golünü attı!`
+          : num === 3
+            ? ` HAT-TRICK! ${P} üç gole ulaştı!`
+            : num >= 4
+              ? ` ${P} bu akşam ${num}. golünde!`
+              : ''
+      let lead: string
+      if (diff === 0) lead = `Beraberlik golü, skor ${e.scoreHome}-${e.scoreAway}!`
+      else if (diff < 0) lead = `Farkı azalttılar, skor ${e.scoreHome}-${e.scoreAway}`
+      else if (diff === 1)
+        lead = veryLate
+          ? `Son dakikalarda ${TN} öne geçti! ${e.scoreHome}-${e.scoreAway}`
+          : late
+            ? `Kritik gol, ${TN} önde! ${e.scoreHome}-${e.scoreAway}`
+            : `${TN} öne geçiyor, ${e.scoreHome}-${e.scoreAway}`
+      else lead = `${TN} farkı açıyor, skor ${e.scoreHome}-${e.scoreAway}`
+      const base = pick([
+        `GOOOL!! ${P} ağları havalandırdı!`,
+        `GOOOL!! ${P}'dan muhteşem bir vuruş!`,
+        `GOL GELDİ! ${P} sahneye çıktı!`,
       ])
+      return `${base} ${lead}.${braceTag}`
+    }
     case 'own_goal':
       return pick([
         `KENDİ KALESİNE! ${P} talihsiz bir sekmeyle topu kendi ağına gönderdi! Skor ${e.scoreHome}-${e.scoreAway}`,
         `Ne talihsizlik! ${P}'dan kendi kalesine gol! ${e.scoreHome}-${e.scoreAway}`,
       ])
     case 'penalty_awarded':
-      return `PENALTI! ${TN} beyaz noktadan yararlanacak`
+      if (veryLate) return `SON DAKİKA PENALTISI! ${TN} beyaz noktadan tarihi bir şans yakaladı!`
+      if (diff < 0) return `PENALTI! Geride olan ${TN} için altın fırsat, beyaz nokta!`
+      return pick([`PENALTI! ${TN} beyaz noktadan yararlanacak`, `Hakem noktayı gösterdi — ${TN} penaltı kazandı!`])
     case 'corner':
       return pick([`Korner kazanan taraf ${TN}`, `${TN} korner kullanacak`])
     case 'throw_in':
