@@ -138,6 +138,9 @@ class MatchSim {
   substitutions: SubRecord[] = []
   // Takım taktiği (mentalite/pres/genişlik); yoksa dengeli
   tactics: [TeamTactics, TeamTactics] = [BALANCED_TACTICS, BALANCED_TACTICS]
+  // Skor/zaman farkındalıklı EFEKTİF taktik: geç maçta önde olan geri çekilir,
+  // geride olan öne yüklenir. Her tick güncellenir; motor bunu okur.
+  effTactics: [TeamTactics, TeamTactics] = [BALANCED_TACTICS, BALANCED_TACTICS]
 
   constructor(home: TeamInfo, away: TeamInfo, seed: number) {
     this.rng = createRng(seed)
@@ -151,6 +154,7 @@ class MatchSim {
     })
     this.teams = [clone(home), clone(away)]
     this.tactics = [home.tactics ?? BALANCED_TACTICS, away.tactics ?? BALANCED_TACTICS]
+    this.effTactics = [this.tactics[0], this.tactics[1]]
     this.benchPool = [[...this.teams[0].subs], [...this.teams[1].subs]]
     for (let t = 0; t < 2; t++) {
       const info = this.teams[t]
@@ -253,6 +257,41 @@ class MatchSim {
       scoreAway: this.score[1],
       text,
     })
+  }
+
+  // Skor/zaman farkındalığı: geç maçta (60'+) önde olan takım savunmaya çekilir
+  // (mentalite/pres düşer), geride olan öne yüklenir (mentalite/pres artar).
+  // Fark büyüdükçe ve süre azaldıkça etki güçlenir. Efektif taktik her tick
+  // taban taktik + bu kaymayla hesaplanır; ±1.5 ile sınırlanır.
+  updateEffectiveTactics(): void {
+    const clock = this.clockDisplay()
+    const timeFactor = Math.min(1, Math.max(0, (clock - 60 * 60) / (30 * 60))) // 60'..90'
+    const clamp = (v: number): number => Math.max(-1.5, Math.min(1.5, v))
+    for (let t = 0; t < 2; t++) {
+      const base = this.tactics[t]
+      const diff = this.score[t] - this.score[1 - t]
+      let mShift = 0
+      let pShift = 0
+      if (diff > 0 && timeFactor > 0) {
+        // Önde: avantajı koru — geri çekil, presi düşür
+        const k = Math.min(1, diff * 0.6) * timeFactor
+        mShift = -k
+        pShift = -0.3 * timeFactor * Math.min(1, diff)
+      } else if (diff < 0 && timeFactor > 0) {
+        // Geride: maçı kovala — öne yüklen, presi artır
+        const k = Math.min(1, -diff * 0.5) * timeFactor
+        mShift = k * 1.1
+        pShift = 0.5 * timeFactor * Math.min(1, -diff)
+      }
+      this.effTactics[t] =
+        mShift === 0 && pShift === 0
+          ? base
+          : {
+              mentality: clamp(base.mentality + mShift),
+              press: clamp(base.press + pShift),
+              width: base.width,
+            }
+    }
   }
 
   // Oyuncu değişikliği: ölü top anlarında (setupRestart) denenir. Belirli
@@ -1353,6 +1392,8 @@ class MatchSim {
       }
     }
 
+    this.updateEffectiveTactics()
+
     if (this.phase.kind === 'restart') {
       this.stepRestart(dt)
     } else {
@@ -1558,7 +1599,7 @@ class MatchSim {
         this.attackDir[carrier.teamIdx],
         this.rng,
         counter,
-        this.tactics[carrier.teamIdx],
+        this.effTactics[carrier.teamIdx],
       )
       this.nextDecisionTick = this.tick + (counter ? 6 : 8)
       if (decision.kind === 'pass') {
@@ -1870,7 +1911,7 @@ class MatchSim {
       // Top kendi yarı sahasına yaklaştıysa sert angajman; rakip sahadaysa
       // mesafeli karşılama (bekler, dalmaz) — full saha pres yok
       // Taktik pres: yüksek pres daha ileride sert angajmana geçer (0 = dengeli)
-      const aggressive = ballAttDef.x < 8 + this.tactics[defTeam].press * 10
+      const aggressive = ballAttDef.x < 8 + this.effTactics[defTeam].press * 10
       const engager = this.assignEngager(defTeam, carrier.pos, aggressive ? 24 : 15)
       if (engager >= 0) {
         const e = this.players[engager]
@@ -2269,7 +2310,7 @@ class MatchSim {
           this.attackDir[p.teamIdx],
           bp,
           possTeam === p.teamIdx,
-          this.tactics[p.teamIdx],
+          this.effTactics[p.teamIdx],
         )
 
         // Hücumdaki oyuncu ofsayt çizgisinin gerisinde kalır (çizgi dansı)
