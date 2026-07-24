@@ -78,6 +78,7 @@ export class Hud {
         break
       case 'shot_missed':
       case 'shot_blocked':
+      case 'woodwork':
         this.shots[t]++
         break
       case 'corner':

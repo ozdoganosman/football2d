@@ -118,6 +118,7 @@ export type MatchEventKind =
   | 'shot_saved'
   | 'shot_missed'
   | 'shot_blocked'
+  | 'woodwork'
   | 'header'
   | 'goal'
   | 'own_goal'

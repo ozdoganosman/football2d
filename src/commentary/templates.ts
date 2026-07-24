@@ -61,6 +61,12 @@ export function commentaryFor(
       return pick([`${P} vurdu, top az farkla dışarı!`, `${P} şansını denedi, isabetsiz`])
     case 'shot_blocked':
       return pick([`${P}'un şutu savunmaya çarptı`, `${P} vurdu ama şut kapandı`])
+    case 'woodwork':
+      return pick([
+        `DİREK! ${P}'un şutu direğe çarpıp döndü!`,
+        `Az kalsın! ${P}'un vuruşu üst direği yalayıp çıktı!`,
+        `${P} direği buldu! Ne şanssızlık!`,
+      ])
     case 'header':
       return rng.next() < 0.45
         ? null

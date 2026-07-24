@@ -6,12 +6,17 @@ export type ShotOutcome =
   | { kind: 'goal' }
   | { kind: 'saved'; held: boolean } // held: kaleci topu kontrol etti
   | { kind: 'parried_corner' }
+  | { kind: 'woodwork' } // direğe/üst direğe çarptı
   | { kind: 'missed' }
 
 // Şut varış anında çözülür. quality 0..1 karar anında hesaplanmıştır.
 export function resolveShot(quality: number, keeper: PlayerSim | null, rng: Rng): ShotOutcome {
   const offTargetP = Math.min(0.75, 0.26 + 0.35 * (1 - quality))
   if (rng.chance(offTargetP)) return { kind: 'missed' }
+
+  // Direk/üst direk: köşeye giden isabetli şutların küçük bir kısmı çerçeveye
+  // çarpar (gerçek futbolda tüm şutların ~%1-2'si). İyi şutta biraz daha olası.
+  if (rng.chance(0.045 + quality * 0.03)) return { kind: 'woodwork' }
 
   const g = keeper && !keeper.sentOff ? gkSkill(keeper.info.attributes) : 0.15
   const goalP = Math.min(0.9, Math.max(0.05, quality * (2.0 - g)))

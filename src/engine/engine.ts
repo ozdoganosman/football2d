@@ -1331,6 +1331,37 @@ class MatchSim {
       this.scoreGoal(byId)
       return
     }
+    if (outcome.kind === 'woodwork') {
+      // Direğe/üst direğe çarptı: çoğunlukla sahaya döner (dönen top), bazen
+      // dışarı seker (korner/kale vuruşu), çok nadir çarpıp içeri girer.
+      this.pushEvent('woodwork', by.teamIdx, byId)
+      const dir = this.attackDir[by.teamIdx]
+      const r = this.rng.next()
+      if (r < 0.06) {
+        this.scoreGoal(byId) // direkten sekip içeri
+        return
+      }
+      if (r < 0.4) {
+        // dışarı seker → korner
+        this.corners[by.teamIdx]++
+        this.pushEvent('corner', by.teamIdx)
+        const spot = {
+          x: dir * (HALF_LENGTH - 0.5),
+          y: Math.sign(this.ball.to.y || 1) * (HALF_WIDTH - 0.5),
+        }
+        this.setupRestart('corner', by.teamIdx, spot, 30)
+        return
+      }
+      // Sahaya döner: kale önünde tehlikeli dönen top
+      const dropPos = {
+        x: this.ball.to.x - dir * this.rng.range(3, 8),
+        y: this.ball.to.y + this.rng.range(-5, 5),
+      }
+      this.looseBall(dropPos, { x: -dir, y: this.rng.range(-0.6, 0.6) }, this.rng.range(2, 4))
+      this.lastTouchTeam = by.teamIdx
+      this.lastTouchId = byId
+      return
+    }
     if (outcome.kind === 'missed') {
       this.pushEvent('shot_missed', by.teamIdx, byId)
       const defTeam = 1 - by.teamIdx

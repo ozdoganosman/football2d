@@ -52,6 +52,7 @@ export function buildHighlights(events: MatchEvent[], frameCount: number): Highl
       case 'shot_saved':
       case 'shot_missed':
       case 'shot_blocked':
+      case 'woodwork':
         push(e.tick - 11 * S, e.tick + 4 * S)
         break
       case 'penalty_awarded':
