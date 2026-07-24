@@ -47,6 +47,11 @@ export function commentaryFor(
       return pick([`${P}, ${T}'dan topu sıyırdı`, `${P} müdahaleyle topu kazandı`])
     case 'foul':
       return pick([`${P} faul yaptı, ${T} yerde`, `Hakem düdüğü çaldı: ${P} faulü`])
+    case 'advantage':
+      return pick([
+        `Faul var ama hakem AVANTAJ bıraktı, ${TN} devam ediyor!`,
+        `${P} faul yaptı — hakem oynat dedi, avantaj ${TN}'da!`,
+      ])
     case 'yellow_card':
       return `${P} sarı kart gördü`
     case 'red_card':

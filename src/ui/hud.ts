@@ -87,6 +87,11 @@ export class Hud {
       case 'foul':
         this.fouls[t]++
         break
+      case 'advantage':
+        // teamIdx = avantajı alan (faule uğrayan) takım; faul rakibinde
+        this.fouls[1 - t]++
+        this.addFeed(e, `Avantaj: ${this.teams[t].name} oynamaya devam`, 'neutral')
+        break
       case 'offside':
         this.offsides[t]++
         break

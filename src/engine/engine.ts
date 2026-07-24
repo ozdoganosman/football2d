@@ -1251,6 +1251,18 @@ class MatchSim {
     this.setupRestart('kickoff', def.teamIdx, vec(0, 0), 45)
   }
 
+  // Faul kart zarları (avantajda da uygulanır — kart avantajdan bağımsızdır)
+  rollFoulCard(tackler: PlayerSim): void {
+    if (this.rng.chance(0.003)) {
+      this.sendOff(tackler, true)
+    } else if (this.rng.chance(0.08)) {
+      tackler.yellows++
+      this.yellowCards[tackler.teamIdx]++
+      this.pushEvent('yellow_card', tackler.teamIdx, tackler.id)
+      if (tackler.yellows >= 2) this.sendOff(tackler, false)
+    }
+  }
+
   handleFoul(tacklerId: number, victimId: number): void {
     const tackler = this.players[tacklerId]
     const victim = this.players[victimId]
@@ -1265,15 +1277,7 @@ class MatchSim {
     this.downedUntil = this.tick + 22
     victim.vel = vec(0, 0)
 
-    // Kart zarları
-    if (this.rng.chance(0.003)) {
-      this.sendOff(tackler, true)
-    } else if (this.rng.chance(0.08)) {
-      tackler.yellows++
-      this.yellowCards[tackler.teamIdx]++
-      this.pushEvent('yellow_card', tackler.teamIdx, tacklerId)
-      if (tackler.yellows >= 2) this.sendOff(tackler, false)
-    }
+    this.rollFoulCard(tackler)
 
     // Ceza sahasında mı? (müdahaleyi yapanın kendi ceza sahası)
     const att = this.toAttack(spot, victim.teamIdx)
@@ -1672,11 +1676,39 @@ class MatchSim {
     // Müdahale denemeleri
     const outcome = attemptTackle(carrier, opponents, this.rng)
     if (outcome.kind === 'foul') {
-      this.players[outcome.tacklerId].tackleCooldown = 3
-      this.handleFoul(outcome.tacklerId, carrier.id)
-      return
-    }
-    if (outcome.kind === 'won') {
+      const tackler = this.players[outcome.tacklerId]
+      // AVANTAJ: faul hücum bölgesinde oldu ve topu taşıyan kontrolünü
+      // koruyorsa (top hâlâ onda) hakem oyunu durdurmaz — top ilerideki
+      // takımda kalır, faul ve kart yine sayılır. Aksi halde düdük çalar.
+      // Avantaj yalnız GERÇEKTEN umut verici bir atakta oynatılır: taşıyıcı
+      // ileri bölgede ve önünde AÇIK KOŞU YOLU varsa (kaleye giden koridorda
+      // engelleyen savunmacı yoksa). Aksi halde duran top (frikik) daha
+      // değerli olduğundan hakem düdüğü çalar. Gerçekte maç başına birkaç kez.
+      const attX = this.toAttack(carrier.pos, carrier.teamIdx).x
+      let clearAhead = true
+      const gDir = norm(sub(vec(HALF_LENGTH * this.attackDir[carrier.teamIdx], 0), carrier.pos))
+      for (const o of opponents) {
+        if (o.id === tackler.id || o.info.role === 'GK') continue
+        const rel = sub(o.pos, carrier.pos)
+        const along = rel.x * gDir.x + rel.y * gDir.y
+        const perp = Math.abs(rel.x * gDir.y - rel.y * gDir.x)
+        if (along > 0 && along < 9 && perp < 4.5) {
+          clearAhead = false
+          break
+        }
+      }
+      if (attX > 12 && clearAhead && this.rng.chance(0.6)) {
+        this.fouls[tackler.teamIdx]++
+        this.rollFoulCard(tackler)
+        tackler.tackleCooldown = 2.5 // faul yapan geri çekilir, hemen dalamaz
+        this.pushEvent('advantage', carrier.teamIdx, outcome.tacklerId, carrier.id)
+        // oyun devam eder: taşıyıcı topu korur (return yok)
+      } else {
+        tackler.tackleCooldown = 3
+        this.handleFoul(outcome.tacklerId, carrier.id)
+        return
+      }
+    } else if (outcome.kind === 'won') {
       const tackler = this.players[outcome.tacklerId]
       tackler.tackleCooldown = 1.5
       this.pushEvent('tackle', tackler.teamIdx, tackler.id, carrier.id)

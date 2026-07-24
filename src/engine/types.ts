@@ -113,6 +113,7 @@ export type MatchEventKind =
   | 'interception'
   | 'tackle'
   | 'foul'
+  | 'advantage'
   | 'yellow_card'
   | 'red_card'
   | 'shot_saved'
