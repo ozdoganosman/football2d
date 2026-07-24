@@ -1327,14 +1327,93 @@ class MatchSim {
   }
 
   // Faul kart zarları (avantajda da uygulanır — kart avantajdan bağımsızdır)
-  rollFoulCard(tackler: PlayerSim): void {
+  // Kart gösterildiyse true döner (sert müdahale — sakatlık olasılığı artar)
+  rollFoulCard(tackler: PlayerSim): boolean {
     if (this.rng.chance(0.003)) {
       this.sendOff(tackler, true)
+      return true
     } else if (this.rng.chance(0.08)) {
       tackler.yellows++
       this.yellowCards[tackler.teamIdx]++
       this.pushEvent('yellow_card', tackler.teamIdx, tackler.id)
       if (tackler.yellows >= 2) this.sendOff(tackler, false)
+      return true
+    }
+    return false
+  }
+
+  // Zorunlu (sakatlık) oyuncu değişikliği: yedek varsa ve hak kaldıysa
+  // sakatlanan oyuncuyu yedekle değiştirir. Başarılıysa true.
+  forceSub(victim: PlayerSim): boolean {
+    const t = victim.teamIdx
+    if (this.subsUsed[t] >= 3) return false
+    const bench = this.benchPool[t]
+    if (bench.length === 0) return false
+    // Aynı rol > (kaleci sakatsa yedek kaleci) > herhangi saha yedeği
+    let bi = bench.findIndex((b) => b.role === victim.info.role)
+    if (bi < 0 && victim.info.role !== 'GK') bi = bench.findIndex((b) => b.role !== 'GK')
+    if (bi < 0) bi = 0
+    const inInfo = bench[bi]
+    bench.splice(bi, 1)
+    const outInfo = victim.info
+    victim.info = inInfo
+    victim.energy = 1
+    victim.sprintReserve = 1
+    victim.yellows = 0
+    victim.tackleCooldown = 0
+    victim.dribbleDir = null
+    this.subsUsed[t]++
+    this.substitutions.push({ tick: this.tick, teamIdx: t, slotIdx: victim.slotIdx, inInfo })
+    const text = `Sakatlık değişikliği (${this.teams[t].shortName}): ${outInfo.name} ⬇ ${inInfo.name} ⬆`
+    this.pushEvent('substitution', t, victim.id, -1, text)
+    return true
+  }
+
+  // Faul kurbanı sakatlanabilir. Sert müdahalede (kart) olasılık artar.
+  // Ciddi sakatlıkta tedavi + zorunlu değişiklik (yedek yoksa eksik kalınır);
+  // hafif sakatlıkta oyuncu ağrıyla azalan enerjiyle devam eder.
+  maybeInjury(victim: PlayerSim, hard: boolean): void {
+    if (!this.rng.chance(hard ? 0.055 : 0.004)) return
+    this.addStoppage(45) // saha içi tedavi maçı uzatır
+    this.freezeUntil = Math.max(this.freezeUntil, this.tick + 20)
+    this.downedId = victim.id
+    this.downedUntil = Math.max(this.downedUntil, this.tick + 35)
+    victim.vel = vec(0, 0)
+    const sn = this.teams[victim.teamIdx].shortName
+    if (this.rng.chance(0.55)) {
+      // Ciddi: oyuna devam edemez
+      this.pushEvent(
+        'injury',
+        victim.teamIdx,
+        victim.id,
+        -1,
+        `Sakatlık (${sn}): ${victim.info.name} oyuna devam edemiyor`,
+      )
+      if (this.forceSub(victim)) {
+        // Yerine taze oyuncu girdi — yerde yatan olarak gösterme
+        if (this.downedId === victim.id) this.downedUntil = this.tick
+      } else {
+        victim.sentOff = true
+        victim.pos = { x: 0, y: -(HALF_WIDTH + 25) - victim.teamIdx * 3 }
+        if (this.downedId === victim.id) this.downedUntil = this.tick
+        this.pushEvent(
+          'injury',
+          victim.teamIdx,
+          victim.id,
+          -1,
+          `${sn} sakatlık nedeniyle eksik devam ediyor`,
+        )
+      }
+    } else {
+      // Hafif: ağrıyla devam (enerji tavanı düşer)
+      this.pushEvent(
+        'injury',
+        victim.teamIdx,
+        victim.id,
+        -1,
+        `Sakatlık (${sn}): ${victim.info.name} tedavi sonrası devam ediyor`,
+      )
+      victim.energy = Math.min(victim.energy, 0.6)
     }
   }
 
@@ -1352,7 +1431,10 @@ class MatchSim {
     this.downedUntil = this.tick + 22
     victim.vel = vec(0, 0)
 
-    this.rollFoulCard(tackler)
+    const carded = this.rollFoulCard(tackler)
+    // Faul kurbanı sakatlanabilir (sert müdahalede daha olası); ciddi
+    // sakatlıkta zorunlu değişiklik restart kurulmadan ÖNCE yapılır
+    this.maybeInjury(victim, carded)
 
     // Ceza sahasında mı? (müdahaleyi yapanın kendi ceza sahası)
     const att = this.toAttack(spot, victim.teamIdx)

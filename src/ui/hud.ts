@@ -109,6 +109,9 @@ export class Hud {
       case 'substitution':
         if (e.text) this.addFeed(e, e.text, 'neutral')
         break
+      case 'injury':
+        if (e.text) this.addFeed(e, e.text, 'yellow')
+        break
       default:
         break
     }

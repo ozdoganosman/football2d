@@ -135,6 +135,7 @@ export type MatchEventKind =
   | 'offside'
   | 'miscontrol'
   | 'substitution'
+  | 'injury'
   | 'half_end'
   | 'full_time'
 

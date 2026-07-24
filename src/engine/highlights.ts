@@ -71,6 +71,10 @@ export function buildHighlights(events: MatchEvent[], frameCount: number): Highl
       case 'red_card':
         push(e.tick - 8 * S, e.tick + 5 * S)
         break
+      case 'injury':
+        // Sakatlık anı + tedavi/değişiklik kısa görünür
+        push(e.tick - 6 * S, e.tick + 4 * S)
+        break
       case 'half_end':
       case 'full_time':
         push(e.tick - 6 * S, e.tick + 1)
