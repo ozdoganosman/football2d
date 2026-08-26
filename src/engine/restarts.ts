@@ -193,18 +193,8 @@ export function crossIntoBox(
     }
   }
   const d = Math.max(1, dist(spot, landing))
-  sim.ball = {
-    kind: 'inFlight',
-    from: { ...spot },
-    to: landing,
-    t: 0,
-    duration: d / 16,
-    flight: 'cross',
-    byId: takerId,
-    targetId: target?.id ?? null,
-    hMax: 4 + d * 0.05,
-    curl,
-  }
+  // Balistik orta: falso gerçek yanal ivmedir (iç/dış bombeli koşu görünür)
+  sim.aerialBall(spot, landing, d / 16, 'cross', takerId, target?.id ?? null, false, curl)
   sim.lastTouchTeam = forTeam
   sim.lastTouchId = takerId
   sim.passesAttempted[forTeam]++
@@ -235,18 +225,8 @@ export function longThrowIntoBox(sim: MatchSim, takerId: number, forTeam: number
     }
   }
   const d = Math.max(1, dist(spot, landing))
-  sim.ball = {
-    kind: 'inFlight',
-    from: { ...spot },
-    to: landing,
-    t: 0,
-    duration: d / 15, // düz ve hızlı hurdle
-    flight: 'cross',
-    byId: takerId,
-    targetId: target?.id ?? null,
-    hMax: 3 + d * 0.04, // korner ortasından daha alçak yay
-    curl: 0,
-  }
+  // Düz ve hızlı fırlatma (falso yok); balistik yay süreden doğar
+  sim.aerialBall(spot, landing, d / 15, 'cross', takerId, target?.id ?? null, false, 0)
   sim.lastTouchTeam = forTeam
   sim.lastTouchId = takerId
   sim.passesAttempted[forTeam]++

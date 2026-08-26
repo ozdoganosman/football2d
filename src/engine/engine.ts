@@ -318,22 +318,74 @@ export class MatchSim {
     if (this.phase.kind === 'restart') return this.phase.spot
     const b = this.ball
     if (b.kind === 'rolling') return b.pos
+    if (b.flight !== 'shot' && b.bPos) return b.bPos // balistik uçuş: gerçek konum
     return this.flightPos(b)
   }
 
-  // Uçuş konumu: yerden paslar sürtünmeyle yavaşlayarak varır (ease-out),
-  // havadan toplar ve şutlar sabit tempoda gider
+  // Şut uçuş konumu (parametrik): kale düzlemindeki kesişmeye sabit tempoda
+  // gider; falso iki uçta sıfıra dönen yanal bombedir (kesişme noktası değişmez)
   flightPos(b: Extract<BallState, { kind: 'inFlight' }>): Vec2 {
     const tt = Math.min(1, b.t)
-    const eased =
-      b.flight === 'shot' || (b.hMax ?? 0) > 0 ? tt : 1 - Math.pow(1 - tt, 1.6)
-    const pos = lerp(b.from, b.to, eased)
-    // Falso: iki uçta da sıfıra dönen yanal bombe, varış noktasını bozmaz.
-    // Şutlarda (duvar üstü kıvrılma) ve ortalarda (iç/dış falso korner) çalışır.
-    if ((b.flight === 'shot' || b.flight === 'cross') && b.curl) {
+    const pos = lerp(b.from, b.to, tt)
+    if (b.flight === 'shot' && b.curl) {
       pos.y += b.curl * Math.sin(Math.PI * tt)
     }
     return pos
+  }
+
+  // Balistik hava topu kur (pas/orta/degaj): iniş noktası `to`ya T sürede
+  // varacak ilk hız + yerçekimi; falso yanal ivme olarak uygulanır ama
+  // ön-telafilidir (v0 = 4A/T, a = -8A/T² → varışta net sapma 0, tepe A).
+  aerialBall(
+    from: Vec2,
+    to: Vec2,
+    duration: number,
+    flight: 'pass' | 'clearance' | 'cross',
+    byId: number,
+    targetId: number | null,
+    offside = false,
+    curlAmp = 0,
+    hMax?: number,
+  ): void {
+    const T = Math.max(0.2, duration)
+    const dirX = (to.x - from.x) / T
+    const dirY = (to.y - from.y) / T
+    const z0 = 0.25
+    const vz0 = (0.5 * 9.81 * T * T - z0) / T
+    let curlAx: Vec2 | undefined
+    let curlA: number | undefined
+    let vx = dirX
+    let vy = dirY
+    if (curlAmp) {
+      const L = Math.hypot(to.x - from.x, to.y - from.y)
+      if (L > 1e-6) {
+        curlAx = { x: -(to.y - from.y) / L, y: (to.x - from.x) / L }
+        const v0c = (4 * curlAmp) / T
+        curlA = (-8 * curlAmp) / (T * T)
+        vx += curlAx.x * v0c
+        vy += curlAx.y * v0c
+      }
+    }
+    this.ball = {
+      kind: 'inFlight',
+      from: { ...from },
+      to: { ...to },
+      t: 0,
+      duration: T,
+      flight,
+      byId,
+      targetId,
+      offside,
+      hMax: hMax ?? z0 + (vz0 * vz0) / (2 * 9.81),
+      curl: curlAmp,
+      bPos: { ...from },
+      bVel: { x: vx, y: vy },
+      bZ: z0,
+      bVz: vz0,
+      curlAx,
+      curlA,
+      bounces: 0,
+    }
   }
 
   possTeam(): number {
@@ -865,7 +917,8 @@ export class MatchSim {
     if (this.ball.flight === 'shot' && this.ball.zTo !== undefined) {
       return 0.25 + (this.ball.zTo - 0.25) * t
     }
-    return 4 * (this.ball.hMax ?? 0) * t * (1 - t)
+    // Balistik uçuş: gerçek yükseklik (sekmeler görselde de görünür)
+    return this.ball.bZ ?? 4 * (this.ball.hMax ?? 0) * t * (1 - t)
   }
 
   recordFrame(): void {

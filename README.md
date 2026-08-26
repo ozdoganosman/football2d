@@ -63,8 +63,12 @@ Kritik mekanikler:
   bir cover, alıcının markajcısı adamıyla iniş noktasına gider; kalanlar
   adam adama markaj/şekil tutar. Son adam kuralı: hat en derin koşucuyu izler.
   Baskı hattı tavanı: full saha pres yok; forvetler prese isteksizdir.
-- **Havadan top**: uzun paslar, ortalar ve degajlar parabolik uçar (gölge +
-  yükseklik görseli); havadaki top kesilemez, bloğun üstünden aşırtma işler.
+- **Balistik havadan top**: uzun paslar, ortalar ve degajlar gerçek
+  yerçekimiyle entegre uçar; inişte seker (uçuş tipine göre çim emilimi:
+  ağırlıklı pas alıcının önünde oturur, degaj zıplayarak yol alır) ve hız
+  sürekliliğiyle yuvarlanmaya devreder. Falso gerçek yanal ivmedir (iç/dış
+  bombeli koşu görünür); AI topun iniş noktasını değil sekme dahil DURUŞ
+  noktasını okur. Havadaki topa ayak uzanmaz, bloğun üstünden aşırtma işler.
 - **Geometrik şut modeli**: şutör kale ağzında gerçek bir noktaya nişan alır,
   yürütme hatası örneklenir; kaleci GERÇEK konumundan açı kapatma
   geometrisiyle (kendi düzleminde) kesişmeye uzanmaya çalışır. Gol, kurtarış,
@@ -78,8 +82,8 @@ Kritik mekanikler:
 ## Bilinçli sadeleştirmeler
 
 - Yorumlar şablon tabanlı Türkçe metinlerdir.
-- Uçuştaki top parametrik yay izler (tam balistik entegrasyon değil);
-  yuvarlanan top kale çizgisini geçerek gol olamaz (gol yalnız şut zinciriyle).
+- Şut uçuşu parametriktir (kale düzleminde geometrik çözüldüğü için);
+  pas/orta/degaj tam balistiktir.
 - Geri pas kuralı yok (kaleci her topu elle alabilir); avantajdan düdüğe
   geri dönüş yok.
 

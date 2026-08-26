@@ -34,6 +34,28 @@ export function meetRollingBall(sim: MatchSim, p: PlayerSim, maxSpd: number): Ve
   return { x: b.pos.x + dir.x * sEnd, y: b.pos.y + dir.y * sEnd }
 }
 
+// Havadan topun tahmini DURUŞ noktası: iniş + sekme/yuvarlanma payı.
+// Alıcı ve görevli iniş noktasına değil topun gerçekten duracağı yere koşar
+// (gerçek oyuncular sekmeyi okur) — balistik toplara karşı AI kör kalmaz.
+export function aerialSettlePoint(sim: MatchSim): Vec2 {
+  const b = sim.ball
+  if (b.kind !== 'inFlight' || b.flight === 'shot' || !b.bVel) return sim.ballPos()
+  const v = Math.hypot(b.bVel.x, b.bVel.y)
+  if (v < 0.3) return { ...b.to }
+  const absorb = b.flight === 'pass' ? 0.35 : b.flight === 'cross' ? 0.45 : 0.5
+  const cap = b.flight === 'pass' ? 4.5 : b.flight === 'cross' ? 6 : 7
+  // İki sekme sonrası yaklaşık hız → yuvarlanma mesafesi (a = 1.5 m/s²)
+  const vSettle = Math.min(cap, v * absorb * absorb)
+  const hop = v * absorb * 0.5 // sekme sıçramalarının yatay yolu (kaba)
+  const roll = (vSettle * vSettle) / (2 * 1.5)
+  const ux = b.bVel.x / v
+  const uy = b.bVel.y / v
+  return {
+    x: Math.max(-HALF_LENGTH + 1, Math.min(HALF_LENGTH - 1, b.to.x + ux * (hop + roll * 0.6))),
+    y: Math.max(-HALF_WIDTH + 1, Math.min(HALF_WIDTH - 1, b.to.y + uy * (hop + roll * 0.6))),
+  }
+}
+
 // Rakip blok hatları (attTeam'in hücum çerçevesinde): savunma hattı =
 // ofsayt çizgisi, orta saha hattı = rakip MF'lerin medyan derinliği.
 // pocket = iki blok arasındaki cebin derinliği (m)
@@ -295,15 +317,16 @@ export function movePlayers(sim: MatchSim, dt: number): void {
   } else if (sim.ball.kind === 'inFlight' && sim.ball.flight !== 'shot') {
     const b = sim.ball
     defTeam = 1 - sim.players[b.byId].teamIdx
-    // Pas hedefindeki oyuncu topun varış noktasına koşar
+    // Alıcı ve görevli topun tahmini DURUŞ noktasına koşar (sekme payı dahil)
+    const settle = aerialSettlePoint(sim)
     if (b.targetId !== null && !sim.players[b.targetId].sentOff) {
-      overrides.set(b.targetId, { target: b.to, sprint: true })
+      overrides.set(b.targetId, { target: settle, sprint: true })
     }
-    // Savunmadan yalnız yetişebilecek TEK görevli iniş noktasına gider
+    // Savunmadan yalnız yetişebilecek TEK görevli duruş noktasına gider
     const remaining = Math.max(0, 1 - b.t) * b.duration
-    const reach = remaining * 7.5 + 5
-    const engager = assignEngager(sim, defTeam, b.to, reach)
-    if (engager >= 0) overrides.set(engager, { target: b.to, sprint: true })
+    const reach = remaining * 7.5 + 8
+    const engager = assignEngager(sim, defTeam, settle, reach)
+    if (engager >= 0) overrides.set(engager, { target: settle, sprint: true })
     // Alıcının markajcısı adamıyla birlikte topa gider: alıcıya en yakın
     // savunmacı da iniş noktasına koşar (adam takibi — sürü değil)
     if (b.targetId !== null) {
@@ -335,8 +358,8 @@ export function movePlayers(sim: MatchSim, dt: number): void {
     }
     // Degaj/uzun top (hedefsiz): hücum eden taraftan da tek oyuncu gider
     if (b.targetId === null) {
-      const att = assignEngager(sim, 1 - defTeam, b.to, 30)
-      if (att >= 0) overrides.set(att, { target: b.to, sprint: true })
+      const att = assignEngager(sim, 1 - defTeam, settle, 34)
+      if (att >= 0) overrides.set(att, { target: settle, sprint: true })
     }
   } else if (sim.ball.kind === 'rolling') {
     // Boş top: takım başına yalnız en uygun TEK oyuncu (kendi ceza

@@ -73,9 +73,19 @@ export type BallState =
       targetId: number | null
       shotQuality?: number
       offside?: boolean // pas anında alıcı ofsayttaydı; varışta düdük çalınır
-      hMax?: number // uçuş tepe yüksekliği (m); 0/undefined = yerden pas
-      curl?: number // yalnız şutlarda: yanal falso genliği (m), iki uçta da sıfır
+      hMax?: number // fırlatma profili bilgisi (kafa gate'i vb.); yükseklik artık bZ'den okunur
+      curl?: number // falso genliği (m): şutta sine ofseti, havadan topta gerçek yanal ivme
       zTo?: number // şutlarda: kale düzlemindeki kesişme yüksekliği (m) — üstten aut görünür olur
+      // BALİSTİK DURUM (şut dışı uçuşlar): pas/orta/degaj gerçek yerçekimiyle
+      // entegre edilir, iniş sonrası seker ve yuvarlanmaya devreder. Şutlar
+      // parametrik kalır (kale düzleminde geometrik çözülür).
+      bPos?: Vec2 // anlık konum
+      bVel?: Vec2 // yatay hız (m/s)
+      bZ?: number // yükseklik (m)
+      bVz?: number // dikey hız (m/s)
+      curlAx?: Vec2 // falso ekseni (birim, uçuş yönüne dik)
+      curlA?: number // falso ivmesi (m/s²); iniş hedefini bozmayacak şekilde ön-telafili
+      bounces?: number
     }
 
 export type RestartKind =

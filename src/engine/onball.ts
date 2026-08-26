@@ -98,7 +98,7 @@ export function launchPass(
 
   const d = Math.max(1, dist(from, target))
   // Uzun paslar ve ortalar havadan gider (bloğun üstünden aşar)
-  const lofted = flight === 'cross' || d0 > 24
+  const lofted = flight === 'cross' || d0 > 27
 
   if (!lofted) {
     // YERDEN PAS = topa gerçek vuruş. Top fiziksel yuvarlanır: yol boyu
@@ -131,21 +131,21 @@ export function launchPass(
     return
   }
 
-  sim.ball = {
-    kind: 'inFlight',
+  // BALİSTİK havadan pas: gerçek yerçekimiyle uçar, inişte seker, hız
+  // sürekliliğiyle yuvarlanmaya devreder. Pas hızı sabit değil (doğal varyans).
+  sim.aerialBall(
     from,
-    to: target,
-    t: 0,
-    // Pas hızı sabit değil: her pasta doğal değişkenlik var
-    duration: d / (passSpeed(by.info.attributes) * sim.rng.range(0.85, 1.1)),
+    target,
+    d / (passSpeed(by.info.attributes) * sim.rng.range(0.85, 1.1)),
     flight,
     byId,
     targetId,
     offside,
-    hMax: Math.min(7, 2 + d * 0.08),
-  }
+    0,
+    Math.min(7, 2 + d * 0.08),
+  )
   // Havadan pasta da niyet tutulur (iniş sonrası kovalama + tamamlama
-  // sayacı); ofsayt düdüğü havadan pasta varış anında çalınır
+  // sayacı); ofsayt düdüğü ilk yer temasında/dokunuşta çalınır
   sim.passIntent = { byId, targetId, team: by.teamIdx, offside: false, tick: sim.tick }
   sim.lastTouchTeam = by.teamIdx
   sim.lastTouchId = byId
@@ -308,17 +308,7 @@ export function launchClearance(sim: MatchSim, byId: number): void {
     y: Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, from.y + sim.rng.range(-16, 16))),
   }
   const d = Math.max(1, dist(from, target))
-  sim.ball = {
-    kind: 'inFlight',
-    from,
-    to: target,
-    t: 0,
-    duration: d / 19,
-    flight: 'clearance',
-    byId,
-    targetId: null,
-    hMax: 3 + d * 0.07, // degaj daima havadan
-  }
+  sim.aerialBall(from, target, d / 19, 'clearance', byId, null, false, 0, 3 + d * 0.07)
   sim.lastTouchTeam = by.teamIdx
   sim.lastTouchId = byId
 }
@@ -435,7 +425,7 @@ export function resolveShotArrival(sim: MatchSim): void {
     sim.pushEvent('shot_missed', by.teamIdx, byId)
     const defTeam = 1 - by.teamIdx
     // Bazen savunmadan sekip kornere çıkar
-    if (sim.rng.chance(0.34)) {
+    if (sim.rng.chance(0.42)) {
       sim.corners[by.teamIdx]++
       sim.pushEvent('corner', by.teamIdx)
       const dir = sim.attackDir[by.teamIdx]
@@ -481,13 +471,37 @@ export function resolveShotArrival(sim: MatchSim): void {
   }
 }
 
-export function resolvePassArrival(sim: MatchSim): void {
-  if (sim.ball.kind !== 'inFlight') return
-  const { to, from } = sim.ball
-  // Havadan gelen top yere iner ve sekerek yuvarlanır; kontrol tamamen
-  // yerdeki kapma sistemine kalır (alıcı passIntent ile kovalamaya devam
-  // eder, tamamlanma ilk kontrol anında sayılır)
-  sim.looseBall(to, norm(sub(to, from)), sim.rng.range(3.5, 5.5))
+// Açık oyundan (şut zinciri dışında) kale çizgisini direkler arasından geçen
+// top: son dokunan hücum ediyorsa GOL, savunuyorsa KENDİ KALESİNE GOL.
+// Karambol golleri, olimpik korner ve talihsiz sekmeler buradan doğar.
+export function scoreFromOpenBall(sim: MatchSim, sideSign: number): void {
+  const attTeam = sim.attackDir[0] === sideSign ? 0 : 1
+  if (sim.lastTouchTeam === attTeam) {
+    // Açık toptan gol de bir "şut girişimi" sayılır (istatistik tutarlılığı:
+    // gol ≤ isabetli şut ≤ şut değişmezi korunur); küçük sabit xG eklenir
+    if (!sim.soActive) {
+      sim.shots[attTeam]++
+      sim.xg[attTeam] += 0.25
+      sim.pendingXg = 0.25
+    }
+    scoreGoal(sim, sim.lastTouchId)
+  } else {
+    scoreOwnGoal(sim, sim.lastTouchId)
+  }
+}
+
+// Ofsayt düdüğü (havadan pas): bayrak pas anında kalkmıştı, düdük topun
+// ilk yer temasında/etkileşiminde çalar — koşu tamamlanır, doğal görünür
+function whistleOffside(sim: MatchSim, b: Extract<MatchSim['ball'], { kind: 'inFlight' }>): void {
+  const passTeam = sim.players[b.byId].teamIdx
+  const defTeam = 1 - passTeam
+  sim.offsides[passTeam]++
+  sim.pushEvent('offside', passTeam, b.targetId ?? b.byId)
+  const spot = {
+    x: Math.max(-HALF_LENGTH + 2, Math.min(HALF_LENGTH - 2, b.to.x)),
+    y: Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, b.to.y)),
+  }
+  sim.setupRestart('free_kick', defTeam, spot, 55)
 }
 
 // Kafa vuruşunu çöz: kazanan bölgeye göre kafayı kaleye vurur (hücum
@@ -496,6 +510,18 @@ export function resolvePassArrival(sim: MatchSim): void {
 export function resolveHeader(sim: MatchSim, winner: PlayerSim, pos: Vec2): void {
   const team = winner.teamIdx
   const att = sim.toAttack(winner.pos, team)
+  // Pas niyeti kafa dokunuşunda çözülür: hedeflenen takım kafalıyorsa pas
+  // TAMAMLANDI sayılır (orta → kafa golü tamamlanmış ortadır), rakip
+  // kafalarsa araya girmedir — muhasebe possess() ile tutarlı
+  const pi = sim.passIntent
+  if (pi) {
+    sim.passIntent = null
+    if (team === pi.team) {
+      sim.passesCompleted[pi.team]++
+    } else if (winner.id !== pi.byId) {
+      sim.pushEvent('interception', team, winner.id)
+    }
+  }
   sim.lastTouchTeam = team
   sim.lastTouchId = winner.id
   // Top kafa vuruşu noktasına yerleşir; ilgili başlatıcı buradan oynar
@@ -519,7 +545,7 @@ export function resolveHeader(sim: MatchSim, winner: PlayerSim, pos: Vec2): void
   // savunma kafası bazen kontrolsüz çıkar ve kendi kale çizgisinin
   // gerisine gider → korner (gerçek maçların başlıca korner kaynağı)
   if (att.x < -HALF_LENGTH + 24) {
-    if (att.x < -HALF_LENGTH + 14 && sim.rng.chance(0.16)) {
+    if (att.x < -HALF_LENGTH + 14 && sim.rng.chance(0.24)) {
       const attTeam = 1 - team
       sim.corners[attTeam]++
       sim.pushEvent('corner', attTeam)
@@ -592,6 +618,12 @@ export function stepRolling(sim: MatchSim, dt: number): void {
   }
 
   if (Math.abs(b.pos.y) > HALF_WIDTH || Math.abs(b.pos.x) > HALF_LENGTH) {
+    // Direkler arasından çizgiyi geçen YERDEKİ top: karambol golü (sekme,
+    // kötü ilk dokunuş, çelinen top...) — şut zinciri olmadan da gol olur
+    if (Math.abs(b.pos.x) > HALF_LENGTH && Math.abs(b.pos.y) < HALF_GOAL) {
+      scoreFromOpenBall(sim, Math.sign(b.pos.x))
+      return
+    }
     outOfBounds(sim, b.pos)
     return
   }
@@ -884,31 +916,75 @@ export function stepInFlight(sim: MatchSim, dt: number): void {
   if (sim.ball.kind !== 'inFlight') return
   const b = sim.ball
   b.t += dt / b.duration
-  const pos = sim.flightPos(b)
 
   if (b.flight === 'shot') {
-    if (b.t >= 1 || Math.abs(pos.x) >= HALF_LENGTH - 0.1) {
+    const sPos = sim.flightPos(b)
+    if (b.t >= 1 || Math.abs(sPos.x) >= HALF_LENGTH - 0.1) {
       resolveShotArrival(sim)
     }
     return
   }
 
-  // Ofsayt: varışta düdük çalınır (alıcı koşusunu tamamlar, doğal görünür)
-  if (b.offside && b.t >= 1) {
-    const passTeam = sim.players[b.byId].teamIdx
-    const defTeam = 1 - passTeam
-    sim.offsides[passTeam]++
-    sim.pushEvent('offside', passTeam, b.targetId ?? b.byId)
-    const spot = {
-      x: Math.max(-HALF_LENGTH + 2, Math.min(HALF_LENGTH - 2, b.to.x)),
-      y: Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, b.to.y)),
+  // BALİSTİK ADIM: yerçekimi + (ilk sekmeye kadar) falso ivmesi
+  if (!b.bPos || !b.bVel || b.bZ === undefined || b.bVz === undefined) return
+  if (b.curlA && b.curlAx && (b.bounces ?? 0) === 0) {
+    b.bVel.x += b.curlAx.x * b.curlA * dt
+    b.bVel.y += b.curlAx.y * b.curlA * dt
+  }
+  b.bVz -= 9.81 * dt
+  b.bZ += b.bVz * dt
+  b.bPos.x += b.bVel.x * dt
+  b.bPos.y += b.bVel.y * dt
+  const pos = b.bPos
+
+  // Saha dışı / kale çizgisi: direkler arasından ve üst direğin altından
+  // geçen top GOLDÜR (olimpik korner, içeri yağan orta/degaj — nadir, gerçek)
+  if (Math.abs(pos.y) > HALF_WIDTH || Math.abs(pos.x) > HALF_LENGTH) {
+    if (b.offside) {
+      whistleOffside(sim, b)
+      return
     }
-    sim.setupRestart('free_kick', defTeam, spot, 55)
+    if (Math.abs(pos.x) > HALF_LENGTH && Math.abs(pos.y) < HALF_GOAL && b.bZ < 2.44) {
+      scoreFromOpenBall(sim, Math.sign(pos.x))
+      return
+    }
+    outOfBounds(sim, pos)
     return
   }
 
-  // Topun anlık yüksekliği (parabolik): havadaki topa ayak uzanmaz
-  const height = 4 * (b.hMax ?? 0) * b.t * (1 - b.t)
+  // İNİŞ: ilk yer temasında ofsayt düdüğü; değilse sekme → alçalınca
+  // hız sürekliliğiyle yuvarlanmaya devir (yapay çıkış hızı yok)
+  if (b.bZ <= 0 && b.bVz < 0) {
+    if (b.offside) {
+      whistleOffside(sim, b)
+      return
+    }
+    b.bZ = 0
+    b.bVz = -b.bVz * 0.5
+    // Çim sekmesi yatay hızı ciddi emer; ağırlıklı pas (falsolu/ölçülü)
+    // alıcının önünde OTURUR, degaj ise zıplayarak yol alır
+    const absorb = b.flight === 'pass' ? 0.35 : b.flight === 'cross' ? 0.45 : 0.5
+    b.bVel.x *= absorb
+    b.bVel.y *= absorb
+    b.bounces = (b.bounces ?? 0) + 1
+    b.curlA = 0
+    if (b.bVz < 2.6) {
+      // Yuvarlanmaya devir: hız sürekli ama çim yuvarlanma hızını sınırlar
+      const cap = b.flight === 'pass' ? 4.5 : b.flight === 'cross' ? 6 : 7
+      let vx = b.bVel.x
+      let vy = b.bVel.y
+      const sp = Math.hypot(vx, vy)
+      if (sp > cap) {
+        vx *= cap / sp
+        vy *= cap / sp
+      }
+      sim.ball = { kind: 'rolling', pos: { ...pos }, vel: { x: vx, y: vy }, controllerId: -1 }
+      return
+    }
+  }
+
+  // Topun anlık yüksekliği (balistik): havadaki topa ayak uzanmaz
+  const height = b.bZ
 
   // Uçuş ortası araya girme (paslar/ortalar) — yolun ilk çeyreği hariç ve
   // yalnız top erişilebilir yükseklikteyken. Ofsayt pasına savunma dokunmaz.
@@ -982,12 +1058,4 @@ export function stepInFlight(sim: MatchSim, dt: number): void {
       }
     }
   }
-
-  // Saha dışına mı gidiyor?
-  if (Math.abs(pos.y) > HALF_WIDTH || Math.abs(pos.x) > HALF_LENGTH) {
-    outOfBounds(sim, pos)
-    return
-  }
-
-  if (b.t >= 1) resolvePassArrival(sim)
 }
