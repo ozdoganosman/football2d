@@ -65,16 +65,23 @@ Kritik mekanikler:
   Baskı hattı tavanı: full saha pres yok; forvetler prese isteksizdir.
 - **Havadan top**: uzun paslar, ortalar ve degajlar parabolik uçar (gölge +
   yükseklik görseli); havadaki top kesilemez, bloğun üstünden aşırtma işler.
+- **Geometrik şut modeli**: şutör kale ağzında gerçek bir noktaya nişan alır,
+  yürütme hatası örneklenir; kaleci GERÇEK konumundan açı kapatma
+  geometrisiyle (kendi düzleminde) kesişmeye uzanmaya çalışır. Gol, kurtarış,
+  aut ve direk bu geometriden kendiliğinden doğar; kafa vuruşu daha yavaş ve
+  dağınıktır; xG aynı geometrinin Gauss-Hermite integralidir
+  (`src/engine/shooting.ts`, `src/engine/xg.ts`).
 - **Doku**: baskı altında pas hatası büyür, pas hızları değişkendir, top
   sürme kararlı ve görünürdür, baskı altındaki taşıyıcıya takım arkadaşları
   pas açısı yaratır, oyuncular enerjilerini idareli kullanır.
 
-## Bilinçli sadeleştirmeler (v1)
+## Bilinçli sadeleştirmeler
 
-- Oyuncu değişikliği yok (kulübeler kozmetik); uzatma/penaltı serisi yok;
-  kendi kalesine gol yok.
-- Taktik ayarları (mentalite/tempo/pres) henüz yok — formasyon seçilebilir.
 - Yorumlar şablon tabanlı Türkçe metinlerdir.
+- Uçuştaki top parametrik yay izler (tam balistik entegrasyon değil);
+  yuvarlanan top kale çizgisini geçerek gol olamaz (gol yalnız şut zinciriyle).
+- Geri pas kuralı yok (kaleci her topu elle alabilir); avantajdan düdüğe
+  geri dönüş yok.
 
 ## Denge notları
 
@@ -83,8 +90,8 @@ kalecilik, dayanıklılık) motor katsayılarına `src/engine/attributes.ts`
 üzerinden bağlanır; denge ayarı bu dosya + `decisions.ts` puan ağırlıkları +
 `duels.ts`/`shooting.ts` olasılıklarından yapılır. Mevcut ayar gerçek maç
 istatistiklerine kalibredir (~16-40 maçlık taramalarda): maç başına ~2.5-3
-gol, takım başına ~10-17 şut, ~400-750 pas (%74-82 isabet), ~10-14 faul,
-~1.5 sarı kart, ~3-5 korner, maç başına ~2-4 ofsayt; ölü top süreleri
+gol, takım başına ~11-15 şut, ~400-750 pas (%74-82 isabet), ~10-14 faul,
+~1.5 sarı kart, ~2-4 korner, maç başına ~2-4 ofsayt; penaltı dönüşümü ~%76-80; ölü top süreleri
 gerçekçidir (taç ~12 sn, kale vuruşu/korner ~13 sn) ve topun oyunda kalma
 süresi gerçek maç seviyesine iner. Güçlü kadro maçların çoğunluğunu kazanır.
 `tests/balance.test.ts` bu bantları regresyon olarak kilitler.

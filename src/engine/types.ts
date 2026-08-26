@@ -75,6 +75,7 @@ export type BallState =
       offside?: boolean // pas anında alıcı ofsayttaydı; varışta düdük çalınır
       hMax?: number // uçuş tepe yüksekliği (m); 0/undefined = yerden pas
       curl?: number // yalnız şutlarda: yanal falso genliği (m), iki uçta da sıfır
+      zTo?: number // şutlarda: kale düzlemindeki kesişme yüksekliği (m) — üstten aut görünür olur
     }
 
 export type RestartKind =

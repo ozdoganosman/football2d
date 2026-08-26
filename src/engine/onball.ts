@@ -19,9 +19,9 @@ import {
 } from './attributes'
 import { sharpness } from './stamina'
 import { attemptTackle } from './duels'
-import { resolveShot } from './shooting'
+import { planShot } from './shooting'
 import { decide, shotQualityAt, type Decision } from './decisions'
-import { xgFromQuality } from './xg'
+import { xgGeometric } from './xg'
 import { add, dist, norm, scale, sub, vec } from './vec'
 import type { MatchSim } from './engine'
 import type { PlayerSim, Vec2 } from './types'
@@ -153,18 +153,17 @@ export function launchPass(
   sim.pushEvent('pass', by.teamIdx, byId, targetId)
 }
 
-export function launchShot(sim: MatchSim, byId: number, quality: number, isPenalty = false): void {
+export function launchShot(
+  sim: MatchSim,
+  byId: number,
+  quality: number,
+  isPenalty = false,
+  headed = false,
+): void {
   const by = sim.players[byId]
   const from = { ...sim.ballPos() }
   const dir = sim.attackDir[by.teamIdx]
   const keeper = sim.keeperOf(1 - by.teamIdx)
-
-  // Beklenen gol: şut GERÇEK kaleciye ulaşırsa geçerli olan değer (resolveShot
-  // zinciriyle birebir → toplam xG gol sayısıyla tutarlı). Penaltı sabit ~0.76
-  // (gerçekçi penaltı xG'si). Bloklanan şut kaleciye varmadığından düşük xG.
-  const xg = isPenalty
-    ? 0.76
-    : xgFromQuality(quality, keeper && !keeper.sentOff ? gkSkill(keeper.info.attributes) : 0.15)
 
   // Şut anında blok kontrolü — sekmelerle (deflection): blok çoğunlukla topu
   // durdurur; bazen auta sekip KORNER olur, nadiren kaleciyi çalıp devrilerek
@@ -174,7 +173,7 @@ export function launchShot(sim: MatchSim, byId: number, quality: number, isPenal
     if (o.info.role === 'GK') continue
     const toGoal = dist(from, goal)
     const oDist = dist(o.pos, from)
-    if (oDist < 3 && dist(o.pos, goal) < toGoal && sim.rng.chance(0.22)) {
+    if (oDist < 3.5 && dist(o.pos, goal) < toGoal && sim.rng.chance(0.3)) {
       sim.shots[by.teamIdx]++
       // El: blok bazen kolla olur → penaltı/serbest vuruş (nadir)
       if (sim.rng.chance(0.02)) {
@@ -214,35 +213,55 @@ export function launchShot(sim: MatchSim, byId: number, quality: number, isPenal
     }
   }
 
-  // Bloklanmadı, kaleciye ulaştı: tam xG'yi say ve sonucuna iliştir.
-  // Penaltı serisi ayrı bir tiebreak — maç xG/şut istatistiğine yazılmaz.
+  // Bloklanmadı: GEOMETRİK ÇÖZÜM. Şut hızı → uçuş süresi → nişan + yürütme
+  // hatası + kalecinin gerçek konumu/refleksiyle kesişme testi (planShot).
+  // Şut hızı vuruş gücüne/kaliteye bağlı: zayıf şut ~17-20 m/s, güçlü ve
+  // isabetli şut ~30-33 m/s.
+  const skill = shootSkill(by.info.attributes)
+  // Kafa vuruşu ayak şutundan çok daha yavaştır (~9-15 m/s) — kaleciye
+  // gerçekçi reaksiyon penceresi doğar
+  const shotSpeed = headed
+    ? Math.max(8, Math.min(16, 8 + skill * 4 + quality * 3 + sim.rng.range(-1, 1)))
+    : Math.max(15, Math.min(33, 15 + skill * 13 + quality * 4 + sim.rng.range(-2, 2)))
+  // Baskı: en yakın saha rakibi (şut sapmasını büyütür)
+  let nearestOpp = 99
+  for (const o of sim.active(1 - by.teamIdx)) {
+    if (o.info.role === 'GK') continue
+    nearestOpp = Math.min(nearestOpp, dist(o.pos, by.pos))
+  }
+  const pressure01 = Math.max(0, Math.min(1, 1 - Math.max(0, nearestOpp - 1.8) / 5))
+  const dPlane = Math.max(1, Math.hypot(goal.x - from.x, from.y))
+  const flightT = dPlane / shotSpeed
+
+  const plan = planShot({
+    from,
+    dir,
+    goalX: goal.x,
+    shooter: by,
+    keeper,
+    quality,
+    pressure01,
+    flightT,
+    rng: sim.rng,
+    isPenalty,
+    headed,
+  })
+  sim.pendingShot = plan.outcome
+
+  // Beklenen gol: aynı geometrinin deterministik integrali (xg.ts). Penaltı
+  // sabit ~0.76. Penaltı serisi ayrı tiebreak — maç istatistiğine yazılmaz.
   if (!sim.soActive) {
+    const xg = isPenalty
+      ? 0.76
+      : xgGeometric({ from, goalX: goal.x, shooter: by, keeper, quality, pressure01, flightT, headed })
     sim.xg[by.teamIdx] += xg
     sim.pendingXg = xg
   }
 
-  const outcome = resolveShot(quality, keeper, sim.rng, isPenalty)
-  sim.pendingShot = outcome
-  let targetY: number
-  if (outcome.kind === 'missed') {
-    targetY = (sim.rng.chance(0.5) ? 1 : -1) * sim.rng.range(HALF_GOAL + 0.4, HALF_GOAL + 4)
-  } else if (outcome.kind === 'goal') {
-    // Kaleci beaten: köşeye/dip direğe yakın, gerçekten zor bir nokta
-    const sign = sim.rng.chance(0.5) ? 1 : -1
-    targetY = sign * sim.rng.range(HALF_GOAL * 0.45, HALF_GOAL - 0.3)
-  } else {
-    // Kurtarış/korner: merkeze yakın, kalecinin makul erişimindeki bölge
-    targetY = sim.rng.range(-HALF_GOAL * 0.6, HALF_GOAL * 0.6)
-  }
-  const target = { x: HALF_LENGTH * dir, y: targetY }
+  // Top gerçek kesişme noktasına uçar: aut görünür şekilde dışarı, kurtarış
+  // gerçekten kalecinin uzandığı noktada biter (sonuç ve görüntü aynı gerçek)
+  const target = { x: HALF_LENGTH * dir, y: plan.targetY }
   const d = Math.max(1, dist(from, target))
-  // Şut hızı vuruş gücüne/kaliteye bağlı: zayıf şut ~17-20 m/s, güçlü ve
-  // isabetli şut ~30-33 m/s — artık her şut aynı sabit tempoda gitmiyor
-  const skill = shootSkill(by.info.attributes)
-  const shotSpeed = Math.max(
-    15,
-    Math.min(33, 15 + skill * 13 + quality * 4 + sim.rng.range(-2, 2)),
-  )
   sim.ball = {
     kind: 'inFlight',
     from,
@@ -254,20 +273,26 @@ export function launchShot(sim: MatchSim, byId: number, quality: number, isPenal
     targetId: null,
     shotQuality: quality,
     curl: sim.rng.range(-0.9, 0.9),
+    zTo: plan.targetZ,
   }
   sim.lastTouchTeam = by.teamIdx
   sim.lastTouchId = byId
   if (!sim.soActive) sim.shots[by.teamIdx]++ // seri şutları maç istatistiğine girmez
 
-  // Kaleci şutu okur ve varış noktasına atlar: iyi kaleci / zayıf şut daha
-  // hızlı tepki alır, sert/kaliteli şutta reaksiyon payı daralır
+  // Kaleci şutu okur ve GERÇEK kesişme noktasına atlar (çerçeve içine
+  // kısıtlı): iyi kaleci / zayıf şut daha hızlı tepki alır
   if (keeper) {
     const gk = gkSkill(keeper.info.attributes)
     const reactionTicks = Math.max(
       1,
-      Math.round((0.1 + (1 - gk) * 0.22 + quality * 0.12) / TICK_DT),
+      Math.round((0.12 + (1 - gk) * 0.2 + quality * 0.1) / TICK_DT),
     )
-    sim.keeperDive = { keeperId: keeper.id, to: { ...target }, readyTick: sim.tick + reactionTicks }
+    const diveY = Math.max(-HALF_GOAL + 0.3, Math.min(HALF_GOAL - 0.3, plan.targetY))
+    sim.keeperDive = {
+      keeperId: keeper.id,
+      to: { x: goal.x - dir * 0.4, y: diveY },
+      readyTick: sim.tick + reactionTicks,
+    }
   } else {
     sim.keeperDive = null
   }
@@ -483,10 +508,10 @@ export function resolveHeader(sim: MatchSim, winner: PlayerSim, pos: Vec2): void
   if (inShootZone) {
     // Kafa vuruşu kalitesi kafa/boy becerisine bağlı: iyi kafa vuran
     // (uzun santrafor) tehlikeli, kötüsü zararsız
-    const headF = 0.45 + headingSkill(winner.info.attributes) * 0.4
+    const headF = 0.4 + headingSkill(winner.info.attributes) * 0.4
     const q = shotQualityAt(winner, att, sim.active(1 - team)) * headF
     if (q > 0.02) {
-      launchShot(sim, winner.id, q)
+      launchShot(sim, winner.id, q, false, true)
       return
     }
   }

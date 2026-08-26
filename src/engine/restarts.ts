@@ -6,7 +6,6 @@ import {
 } from './constants'
 import { composureFactor, energyFactor, maxSpeed, shootSkill } from './attributes'
 import { shotQualityAt } from './decisions'
-import { xgFromQuality } from './xg'
 import { targetPosition } from './positioning'
 import { add, clampVec, dist, norm, scale, sub, vec } from './vec'
 import type { MatchSim } from './engine'
@@ -500,8 +499,9 @@ export function executeRestart(sim: MatchSim): void {
       // ya da baraja çarpar (blok → dönen top / korner)
       if (sim.rng.chance(0.16)) {
         sim.shots[forTeam]++
-        // Baraja çarpan direkt frikik de bir şuttur: xG'sini say/iliştir
-        const fkXg = xgFromQuality(shotQualityAt(taker, att, sim.active(1 - forTeam)) * 0.82)
+        // Baraja çarpan direkt frikik de bir şuttur: kaleciye hiç varmadığı
+        // için düşük sabit xG (geometrik model bloklu şutu değerlendirmez)
+        const fkXg = 0.04
         sim.xg[forTeam] += fkXg
         sim.pendingXg = fkXg
         sim.pushEvent('shot_blocked', forTeam, takerId)

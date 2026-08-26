@@ -265,8 +265,8 @@ export class MatchSim {
     onball.launchPass(this, byId, targetId, flight, exemptOffside)
   }
 
-  launchShot(byId: number, quality: number, isPenalty = false): void {
-    onball.launchShot(this, byId, quality, isPenalty)
+  launchShot(byId: number, quality: number, isPenalty = false, headed = false): void {
+    onball.launchShot(this, byId, quality, isPenalty, headed)
   }
 
   launchClearance(byId: number): void {
@@ -859,7 +859,13 @@ export class MatchSim {
 
   ballHeight(): number {
     if (this.ball.kind !== 'inFlight') return 0
-    return 4 * (this.ball.hMax ?? 0) * Math.min(1, this.ball.t) * (1 - Math.min(1, this.ball.t))
+    const t = Math.min(1, this.ball.t)
+    // Şut: ayaktan çıkıp kale düzlemindeki gerçek kesişme yüksekliğine gider —
+    // üstten aut ve üst köşe şutları görselde de yükselir
+    if (this.ball.flight === 'shot' && this.ball.zTo !== undefined) {
+      return 0.25 + (this.ball.zTo - 0.25) * t
+    }
+    return 4 * (this.ball.hMax ?? 0) * t * (1 - t)
   }
 
   recordFrame(): void {

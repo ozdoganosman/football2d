@@ -175,9 +175,9 @@ export function decide(
   if (quality > 0.02) {
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
-    if (inBox || quality > 0.1) {
+    if (inBox || quality > 0.12) {
       // Taktik mentalite: hücumcu takım şutu biraz daha ister (0 = dengeli)
-      const score = quality * 1.35 + (inBox ? 0.18 : 0) + tactics.mentality * 0.05
+      const score = quality * 1.18 + (inBox ? 0.16 : 0) + tactics.mentality * 0.05
       options.push({ kind: 'shoot', quality, score })
     }
   }
