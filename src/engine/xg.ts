@@ -5,12 +5,12 @@
 // gol olarak modellenir (resolveShot ile birebir aynı formül).
 //
 // resolveShot zinciri:
-//   offTargetP = min(0.75, 0.26 + 0.35*(1-quality))   → isabetsiz
-//   woodwork  = 0.045 + quality*0.03                   → direk (isabetliyken)
-//   goalP     = min(0.9, max(0.05, quality*(2.0-g)))   → gol (isabet+direk değil)
+//   offTargetP = min(0.78, 0.34 + 0.35*(1-quality))        → isabetsiz
+//   woodwork  = 0.045 + quality*0.03                        → direk (isabetliyken)
+//   goalP     = min(0.9, max(0.05, quality*(1.62-g*0.8)))   → gol (isabet+direk değil)
 export function xgFromQuality(quality: number, g = 0.75): number {
-  const onTarget = 1 - Math.min(0.75, 0.26 + 0.35 * (1 - quality))
+  const onTarget = 1 - Math.min(0.78, 0.34 + 0.35 * (1 - quality))
   const notWood = 1 - (0.045 + quality * 0.03)
-  const goalP = Math.min(0.9, Math.max(0.05, quality * (2.0 - g)))
+  const goalP = Math.min(0.9, Math.max(0.05, quality * (1.62 - g * 0.8)))
   return Math.max(0.01, Math.min(0.95, onTarget * notWood * goalP))
 }

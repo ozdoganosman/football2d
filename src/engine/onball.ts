@@ -93,7 +93,7 @@ export function launchPass(
     const line = sim.offsideLine(by.teamIdx)
     const recvAttX = sim.toAttack(to.pos, by.teamIdx).x
     const ballAttX = sim.toAttack(from, by.teamIdx).x
-    offside = recvAttX > line + 0.25 && recvAttX > ballAttX && recvAttX > 0
+    offside = recvAttX > line + 0.15 && recvAttX > ballAttX && recvAttX > 0
   }
 
   const d = Math.max(1, dist(from, target))
@@ -195,7 +195,7 @@ export function launchShot(sim: MatchSim, byId: number, quality: number, isPenal
         return
       }
       sim.pushEvent('shot_blocked', by.teamIdx, byId)
-      if (roll < 0.115) {
+      if (roll < 0.3) {
         // Sekip kale çizgisinin dışına → korner
         sim.corners[by.teamIdx]++
         sim.pushEvent('corner', by.teamIdx)
@@ -203,7 +203,7 @@ export function launchShot(sim: MatchSim, byId: number, quality: number, isPenal
           x: dir * (HALF_LENGTH - 0.5),
           y: Math.sign(o.pos.y || 1) * (HALF_WIDTH - 0.5),
         }
-        sim.setupRestart('corner', by.teamIdx, spot, 30)
+        sim.setupRestart('corner', by.teamIdx, spot, 90)
         return
       }
       // Normal blok: oyunda kalan sekme
@@ -324,6 +324,10 @@ export function scoreOwnGoal(sim: MatchSim, defenderId: number): void {
 }
 
 export function outOfBounds(sim: MatchSim, pos: Vec2): void {
+  // Ölü top süreleri gerçekçi: taç ~7 sn, kale vuruşu/korner ~9 sn.
+  // Maç saati restart fazında da işlediğinden bu, topun oyunda kaldığı
+  // süreyi gerçek maç seviyesine (~60-70 dk) çeker — pas/şut hacmini
+  // doğal yoldan normalleştiren ana mekanizma.
   // Taç
   if (Math.abs(pos.y) > HALF_WIDTH) {
     const forTeam = 1 - sim.lastTouchTeam
@@ -332,7 +336,7 @@ export function outOfBounds(sim: MatchSim, pos: Vec2): void {
       y: Math.sign(pos.y) * (HALF_WIDTH - 0.3),
     }
     sim.pushEvent('throw_in', forTeam)
-    sim.setupRestart('throw_in', forTeam, spot, 15)
+    sim.setupRestart('throw_in', forTeam, spot, 125)
     return
   }
   // Kale çizgisi
@@ -344,11 +348,11 @@ export function outOfBounds(sim: MatchSim, pos: Vec2): void {
     sim.corners[attTeam]++
     sim.pushEvent('corner', attTeam)
     const spot = { x: side * (HALF_LENGTH - 0.5), y: Math.sign(pos.y || 1) * (HALF_WIDTH - 0.5) }
-    sim.setupRestart('corner', attTeam, spot, 30)
+    sim.setupRestart('corner', attTeam, spot, 110)
   } else {
     sim.pushEvent('goal_kick', defTeam)
     const spot = sim.fromAttack({ x: -HALF_LENGTH + 5.5, y: 0 }, defTeam)
-    sim.setupRestart('goal_kick', defTeam, spot, 20)
+    sim.setupRestart('goal_kick', defTeam, spot, 135)
   }
 }
 
@@ -389,7 +393,7 @@ export function resolveShotArrival(sim: MatchSim): void {
         x: dir * (HALF_LENGTH - 0.5),
         y: Math.sign(sim.ball.to.y || 1) * (HALF_WIDTH - 0.5),
       }
-      sim.setupRestart('corner', by.teamIdx, spot, 30)
+      sim.setupRestart('corner', by.teamIdx, spot, 90)
       return
     }
     // Sahaya döner: kale önünde tehlikeli dönen top
@@ -406,7 +410,7 @@ export function resolveShotArrival(sim: MatchSim): void {
     sim.pushEvent('shot_missed', by.teamIdx, byId)
     const defTeam = 1 - by.teamIdx
     // Bazen savunmadan sekip kornere çıkar
-    if (sim.rng.chance(0.22)) {
+    if (sim.rng.chance(0.34)) {
       sim.corners[by.teamIdx]++
       sim.pushEvent('corner', by.teamIdx)
       const dir = sim.attackDir[by.teamIdx]
@@ -414,12 +418,12 @@ export function resolveShotArrival(sim: MatchSim): void {
         x: dir * (HALF_LENGTH - 0.5),
         y: Math.sign(sim.ball.to.y || 1) * (HALF_WIDTH - 0.5),
       }
-      sim.setupRestart('corner', by.teamIdx, spot, 30)
+      sim.setupRestart('corner', by.teamIdx, spot, 90)
       return
     }
     const spot = sim.fromAttack({ x: -HALF_LENGTH + 5.5, y: 0 }, defTeam)
     sim.pushEvent('goal_kick', defTeam)
-    sim.setupRestart('goal_kick', defTeam, spot, 20)
+    sim.setupRestart('goal_kick', defTeam, spot, 135)
     return
   }
   sim.shotsOnTarget[by.teamIdx]++
@@ -430,7 +434,7 @@ export function resolveShotArrival(sim: MatchSim): void {
     const dir = sim.attackDir[by.teamIdx]
     const ballY = sim.ball.to.y
     const spot = { x: dir * (HALF_LENGTH - 0.5), y: Math.sign(ballY || 1) * (HALF_WIDTH - 0.5) }
-    sim.setupRestart('corner', by.teamIdx, spot, 30)
+    sim.setupRestart('corner', by.teamIdx, spot, 90)
     return
   }
   // saved
@@ -486,8 +490,24 @@ export function resolveHeader(sim: MatchSim, winner: PlayerSim, pos: Vec2): void
       return
     }
   }
-  // SAVUNMA BÖLGESİ (kendi kaleye yakın): kafayla degaj
+  // SAVUNMA BÖLGESİ (kendi kaleye yakın): kafayla degaj. Baskı altındaki
+  // savunma kafası bazen kontrolsüz çıkar ve kendi kale çizgisinin
+  // gerisine gider → korner (gerçek maçların başlıca korner kaynağı)
   if (att.x < -HALF_LENGTH + 24) {
+    if (att.x < -HALF_LENGTH + 14 && sim.rng.chance(0.16)) {
+      const attTeam = 1 - team
+      sim.corners[attTeam]++
+      sim.pushEvent('corner', attTeam)
+      const side = sim.attackDir[attTeam]
+      const spot = {
+        x: side * (HALF_LENGTH - 0.5),
+        y: Math.sign(winner.pos.y || 1) * (HALF_WIDTH - 0.5),
+      }
+      sim.lastTouchTeam = team
+      sim.lastTouchId = winner.id
+      sim.setupRestart('corner', attTeam, spot, 110)
+      return
+    }
     launchClearance(sim, winner.id)
     return
   }
@@ -696,7 +716,9 @@ export function stepRolling(sim: MatchSim, dt: number): void {
       sim.effTactics[carrier.teamIdx],
       returnToId,
     )
-    sim.nextDecisionTick = sim.tick + (counter ? 6 : 8)
+    // Karar temposu: gerçek futbol ritmi — taşıyıcı topu saniyelerce tutar,
+    // pas makineli tüfek gibi çıkmaz (pas/maç sayısını gerçekçi tutan ayar)
+    sim.nextDecisionTick = sim.tick + (counter ? 10 : 14)
     if (decision.kind === 'pass') {
       if (returnToId === decision.targetId) {
         // Bu pas duvar pasını TAMAMLIYOR: yeni bir ver-kaç kurma, yoksa
@@ -745,7 +767,7 @@ export function stepRolling(sim: MatchSim, dt: number): void {
         const pWin = Math.max(0.25, Math.min(0.7, 0.5 + (drb - tck) * 0.6))
         if (sim.rng.chance(pWin)) {
           opp.tackleCooldown = Math.max(opp.tackleCooldown, 1.3) // ekarte
-        } else if (sim.rng.chance(0.08)) {
+        } else if (sim.rng.chance(0.06)) {
           sim.handleFoul(opp.id, carrier.id) // çalım faul kazandırdı
           return
         } else {
@@ -783,7 +805,7 @@ export function stepRolling(sim: MatchSim, dt: number): void {
     b.vel = scale(kickDir, kick)
     sim.lastTouchTeam = carrier.teamIdx
     sim.lastTouchId = carrier.id
-    sim.nextDecisionTick = sim.tick + 3
+    sim.nextDecisionTick = sim.tick + 5
   }
 }
 
@@ -856,7 +878,7 @@ export function stepInFlight(sim: MatchSim, dt: number): void {
       x: Math.max(-HALF_LENGTH + 2, Math.min(HALF_LENGTH - 2, b.to.x)),
       y: Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, b.to.y)),
     }
-    sim.setupRestart('free_kick', defTeam, spot, 20)
+    sim.setupRestart('free_kick', defTeam, spot, 55)
     return
   }
 

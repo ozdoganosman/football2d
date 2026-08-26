@@ -87,12 +87,14 @@ export class MatchSim {
     lanes: [number, number]
     modes: ['pocket' | 'behind', 'pocket' | 'behind']
     until: number
+    gamble: boolean // derin koşucu çizginin ÜSTÜNE erken fırlar (ofsayt riski)
   } = {
     team: -1,
     ids: [-1, -1],
     lanes: [0, 0],
     modes: ['pocket', 'pocket'],
     until: 0,
+    gamble: false,
   }
   // İkili paslaşma (ver-kaç / duvar pası): kısa pası atan oyuncu topu
   // verdikten sonra öne fırlar; alıcı geri pası önceler. Pencere ~2.4 sn.
@@ -477,7 +479,7 @@ export class MatchSim {
             x: Math.max(-HALF_LENGTH + 2, Math.min(HALF_LENGTH - 2, pos.x)),
             y: Math.max(-HALF_WIDTH + 2, Math.min(HALF_WIDTH - 2, pos.y)),
           }
-          this.setupRestart('free_kick', 1 - pi.team, spot, 20)
+          this.setupRestart('free_kick', 1 - pi.team, spot, 55)
           return
         }
         this.passesCompleted[pi.team]++
@@ -495,7 +497,7 @@ export class MatchSim {
     p.vel = scale(p.vel, 0.45)
     // Kontrol dokunuşu: top alındıktan sonra karar için kısa süre geçer;
     // bu süre savunmanın baskı kurmasına imkân verir
-    this.nextDecisionTick = this.tick + (p.info.role === 'GK' ? 12 : 9)
+    this.nextDecisionTick = this.tick + 14
     // Kaleci topu alınca: takım build-up şekline açılana kadar (baskı yoksa)
     // topu tutabileceği tavan — ~2.8 sn (12 tick karar penceresi + 28 tick hold)
     if (p.info.role === 'GK') this.gkHoldUntil = this.tick + 40

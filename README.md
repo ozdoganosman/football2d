@@ -81,6 +81,10 @@ Kritik mekanikler:
 Nitelikler (1-20; hız, pas, şut, top sürme, müdahale, pozisyon alma,
 kalecilik, dayanıklılık) motor katsayılarına `src/engine/attributes.ts`
 üzerinden bağlanır; denge ayarı bu dosya + `decisions.ts` puan ağırlıkları +
-`duels.ts`/`shooting.ts` olasılıklarından yapılır. Mevcut ayarla ~30 maçlık
-taramada: maç başına ~2-4 gol, takım başına ~10-20 şut, ~25 faul, ~2 sarı kart;
-güçlü kadro maçların çoğunluğunu kazanır.
+`duels.ts`/`shooting.ts` olasılıklarından yapılır. Mevcut ayar gerçek maç
+istatistiklerine kalibredir (~16-40 maçlık taramalarda): maç başına ~2.5-3
+gol, takım başına ~10-17 şut, ~400-750 pas (%74-82 isabet), ~10-14 faul,
+~1.5 sarı kart, ~3-5 korner, maç başına ~2-4 ofsayt; ölü top süreleri
+gerçekçidir (taç ~12 sn, kale vuruşu/korner ~13 sn) ve topun oyunda kalma
+süresi gerçek maç seviyesine iner. Güçlü kadro maçların çoğunluğunu kazanır.
+`tests/balance.test.ts` bu bantları regresyon olarak kilitler.

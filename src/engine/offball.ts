@@ -253,7 +253,9 @@ export function movePlayers(sim: MatchSim, dt: number): void {
           }
           if (ids[li] >= 0) used.add(ids[li])
         }
-        sim.pocketRun = { team: attTeam, ids, lanes, modes, until: sim.tick + 35 }
+        // Kumar koşusu: derin koşucu ~%25 pencerede çizgiyi ihlal edecek kadar
+        // erken fırlar — ara pası tam zamanlıysa golle, değilse bayrakla biter
+        sim.pocketRun = { team: attTeam, ids, lanes, modes, until: sim.tick + 35, gamble: sim.rng.chance(0.35) }
       }
     }
 
@@ -440,8 +442,10 @@ export function movePlayers(sim: MatchSim, dt: number): void {
         let x: number
         if (mode === 'behind') {
           // Derin koşu: ofsayt çizgisinin hemen gerisinde kal — ara pası
-          // gelirse koşu yoluna pas onu hattın ARKASINA taşır
+          // gelirse koşu yoluna pas onu hattın ARKASINA taşır. Kumar
+          // koşusunda çizginin üstüne taşar (zamanlama hatası → ofsayt riski)
           x = Math.max(lines.dfLine - 0.5, lines.mfLine + 2)
+          if (sim.pocketRun.gamble) x = lines.dfLine + 1.7
         } else {
           if (lines.pocket < 4) continue // cep kapandı, koşuyu zorlamaz
           const rAttX = sim.toAttack(r.pos, runTeam).x
@@ -638,8 +642,8 @@ export function movePlayers(sim: MatchSim, dt: number): void {
       // Hücumdaki oyuncu ofsayt çizgisinin gerisinde kalır (çizgi dansı)
       if (p.teamIdx === possTeam && p.id !== carrierId) {
         const attT = sim.toAttack(target, p.teamIdx)
-        if (attT.x > onsideLine - 0.4) {
-          target = sim.fromAttack({ x: onsideLine - 0.4, y: attT.y }, p.teamIdx)
+        if (attT.x > onsideLine - 0.15) {
+          target = sim.fromAttack({ x: onsideLine - 0.15, y: attT.y }, p.teamIdx)
         }
       }
 

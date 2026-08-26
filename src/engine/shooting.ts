@@ -31,18 +31,18 @@ export function resolveShot(
     return { kind: 'saved', held: false }
   }
 
-  const offTargetP = Math.min(0.75, 0.26 + 0.35 * (1 - quality))
+  const offTargetP = Math.min(0.78, 0.34 + 0.35 * (1 - quality))
   if (rng.chance(offTargetP)) return { kind: 'missed' }
 
   // Direk/üst direk: köşeye giden isabetli şutların küçük bir kısmı çerçeveye
   // çarpar (gerçek futbolda tüm şutların ~%1-2'si). İyi şutta biraz daha olası.
   if (rng.chance(0.045 + quality * 0.03)) return { kind: 'woodwork' }
 
-  const goalP = Math.min(0.9, Math.max(0.05, quality * (2.0 - g)))
+  const goalP = Math.min(0.9, Math.max(0.05, quality * (1.62 - g * 0.8)))
   if (rng.chance(goalP)) return { kind: 'goal' }
 
   // Kurtarış: çoğunlukla kalecide kalır, bazen korner ya da öne çelme
-  if (rng.chance(0.7)) return { kind: 'saved', held: true }
-  if (rng.chance(0.5)) return { kind: 'parried_corner' }
+  if (rng.chance(0.62)) return { kind: 'saved', held: true }
+  if (rng.chance(0.58)) return { kind: 'parried_corner' }
   return { kind: 'saved', held: false } // öne çeldi → ceza sahasında boş top
 }

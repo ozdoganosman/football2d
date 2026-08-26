@@ -29,7 +29,7 @@ export function setupRestart(
   sim.engagerId = [-1, -1]
   sim.passIntent = null
   sim.oneTwo = null
-  sim.pocketRun = { team: -1, ids: [-1, -1], lanes: [0, 0], modes: ['pocket', 'pocket'], until: 0 }
+  sim.pocketRun = { team: -1, ids: [-1, -1], lanes: [0, 0], modes: ['pocket', 'pocket'], until: 0, gamble: false }
   sim.phase = { kind: 'restart', restart: kind, forTeam, spot: { ...spot }, timer, takerId }
   sim.lastTouchTeam = forTeam
   sim.lastTouchId = takerId

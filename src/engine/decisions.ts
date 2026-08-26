@@ -112,9 +112,10 @@ export function decide(
     const passLen = dist(carrier.pos, m.pos)
     if (passLen < 3 || passLen > 45) continue
     // Bariz ofsayttaki adama pas düşünülmez; çizgiye yakın sınır durumlar
-    // denenir ve bazen bayrağa takılır (doğal ofsaytlar)
+    // denenir ve bazen bayrağa takılır (doğal ofsaytlar). Marj geniş: riskli
+    // ara pasları denemek maç başına 1-2 doğal ofsayt üretir (gerçekçi)
     const mAttX = toAttack(m.pos, attackDir).x
-    if (mAttX > offsideLine + 1.2 && mAttX > att.x && mAttX > 0) continue
+    if (mAttX > offsideLine + 2.6 && mAttX > att.x && mAttX > 0) continue
 
     let laneMin = 99
     let recvMin = 99
@@ -137,15 +138,17 @@ export function decide(
       0.2 * recvSpace +
       progressW * (0.55 + progress) +
       runBonus -
-      0.09 +
+      0.21 +
       (passLen > 26 ? -0.02 * (passLen - 26) : 0) +
-      (passLen < 10 ? -0.012 * (10 - passLen) : 0)
+      (passLen < 10 ? -0.03 * (10 - passLen) : 0)
     // Bloklar arası bonus: iki hat arasındaki cepte BOŞTA gösteren adam
     // değerli bir hedeftir (markajlıysa bonus erir — recvSpace çarpanı)
     if (mAttX > mfLine + 1.5 && mAttX < offsideLine - 1) score += 0.08 * recvSpace
     // Ara pası: ofsayt çizgisine yapışıp İLERİ fırlayan adam derin topun
-    // hedefidir — koşu yoluna pas onu hattın arkasına taşır
-    if (mAttX > offsideLine - 3 && runSpeed > 0.5) score += 0.03
+    // hedefidir — koşu yoluna pas onu hattın arkasına taşır (yüksek bonus:
+    // derin koşuya top atmak modern futbolun ana silahıdır; zamanlama
+    // tutmayınca doğal ofsaytlar doğar)
+    if (mAttX > offsideLine - 3 && runSpeed > 0.5) score += 0.11
     // Duvar pası tamamlama: ver-kaç ortağı öne fırladıysa, geri pas onu
     // markajından sıyırıp ileride bulur (yol açıksa değerli)
     if (m.id === returnToId) score += 0.14 * laneOpen
@@ -218,10 +221,11 @@ export function decide(
   const space = Math.min(1, aheadSpace / 12)
   // Önünde (rakip kaleye bakan koridorda) alan olan oyuncu topu SÜRMEYE
   // meyillidir: puan alan-güdümlü — boş saha gören adam taşır, kalabalıkta
-  // pas arar. Kontrada iştah daha da artar.
+  // pas arar. Kontrada iştah daha da artar. Taban yüksek: gerçek futbolda
+  // taşıyıcı topu saniyelerce taşır, pas ancak değerli bir seçenek doğunca çıkar
   const dribbleScore =
-    0.4 +
-    0.48 * space * dribbleSkill(carrier.info.attributes) +
+    0.56 +
+    0.5 * space * dribbleSkill(carrier.info.attributes) +
     (counter ? 0.1 : 0) -
     pressure * 0.42
   options.push({ kind: 'dribble', dir: goalDir, score: dribbleScore })

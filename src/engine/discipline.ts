@@ -58,10 +58,10 @@ export function trySubstitutions(sim: MatchSim): void {
 // Faul kart zarları (avantajda da uygulanır — kart avantajdan bağımsızdır)
 // Kart gösterildiyse true döner (sert müdahale — sakatlık olasılığı artar)
 export function rollFoulCard(sim: MatchSim, tackler: PlayerSim): boolean {
-  if (sim.rng.chance(0.003)) {
+  if (sim.rng.chance(0.0025)) {
     sendOff(sim, tackler, true)
     return true
-  } else if (sim.rng.chance(0.08)) {
+  } else if (sim.rng.chance(0.12)) {
     tackler.yellows++
     sim.yellowCards[tackler.teamIdx]++
     sim.pushEvent('yellow_card', tackler.teamIdx, tackler.id)
@@ -177,7 +177,7 @@ export function handleFoul(sim: MatchSim, tacklerId: number, victimId: number): 
     sim.pushEvent('free_kick', victim.teamIdx, victimId)
     // Tehlikeli (şut/orta) serbest vuruşta baraj/dizilim oturması için uzun
     // süre; derin/kısa olanlar hızlı alınır
-    const fkTimer = sim.freeKickType(spot, victim.teamIdx) === 'short' ? 25 : 42
+    const fkTimer = sim.freeKickType(spot, victim.teamIdx) === 'short' ? 70 : 100
     sim.setupRestart('free_kick', victim.teamIdx, spot, fkTimer)
   }
 }
@@ -214,7 +214,7 @@ export function handleHandball(sim: MatchSim, offender: PlayerSim): void {
       -1,
       `El! ${offender.info.name} (${sn}) topa elle dokundu — serbest vuruş`,
     )
-    const fkTimer = sim.freeKickType(spot, forTeam) === 'short' ? 25 : 42
+    const fkTimer = sim.freeKickType(spot, forTeam) === 'short' ? 70 : 100
     sim.setupRestart('free_kick', forTeam, spot, fkTimer)
   }
   // El ihlalinde bazen kart (bariz gol engelleme kırmızı olabilir — nadir)
