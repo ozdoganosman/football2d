@@ -102,7 +102,7 @@ function newMatch(): void {
   if (tParam !== null) {
     modeSel.value = 'full'
     playback.setMode('full')
-    playback.playhead = Math.max(0, Math.min(result.frameCount - 1, Number(tParam) | 0))
+    playback.seek(Math.max(0, Math.min(result.frameCount - 1, Number(tParam) | 0)))
     playback.playing = false
     btnPlay.textContent = 'Devam'
   } else {

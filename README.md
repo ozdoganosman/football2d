@@ -59,28 +59,55 @@ Kritik mekanikler:
 - **Ofsayt**: çizgi sondan ikinci savunmacıdan hesaplanır; hücumcular çizgiye
   saygılı pozisyon alır, sınırdaki paslar bayrağa takılır (taç/santra/kale
   vuruşu muaf).
+- **Görev (rol) sistemi**: her formasyon slotu FM tarzı bir iş taşır —
+  bindiren bek, top oynayan stoper, ön libero, oyun kurucu, klasik/içe katan
+  kanat, hedef adam, kutu golcüsü (`SlotJob`, `formations.ts`). Görevler
+  pozisyon ofsetlerini (toplu oyunda kimlik) ve karar yanlılıklarını eğer;
+  ortalar kutudaki hava topu ustasını arar, duran topları en iyi pasör
+  kullanır. Bindiren bek topsuzken bek disipliniyle savunur (son adam kuralı
+  dahil). Sonuç: kadro-sistem uyumu maç sonucunu ham nitelik ortalaması
+  kadar etkiler ve formasyonlar arasında doğal bir taş-kağıt-makas doğar
+  (3-5-2 kanat disipliniyle 4-3-3'ü frenler, 4-3-3 orta saha üçgeniyle düz
+  4-4-2'ye üstündür, 4-4-2 ile 4-2-3-1 dengelidir).
 - **Görev tabanlı savunma**: topa takım başına tek görevli (first defender),
   bir cover, alıcının markajcısı adamıyla iniş noktasına gider; kalanlar
   adam adama markaj/şekil tutar. Son adam kuralı: hat en derin koşucuyu izler.
   Baskı hattı tavanı: full saha pres yok; forvetler prese isteksizdir.
-- **Havadan top**: uzun paslar, ortalar ve degajlar parabolik uçar (gölge +
-  yükseklik görseli); havadaki top kesilemez, bloğun üstünden aşırtma işler.
+- **Balistik havadan top**: uzun paslar, ortalar ve degajlar gerçek
+  yerçekimiyle entegre uçar; inişte seker (uçuş tipine göre çim emilimi:
+  ağırlıklı pas alıcının önünde oturur, degaj zıplayarak yol alır) ve hız
+  sürekliliğiyle yuvarlanmaya devreder. Falso gerçek yanal ivmedir (iç/dış
+  bombeli koşu görünür); AI topun iniş noktasını değil sekme dahil DURUŞ
+  noktasını okur. Havadaki topa ayak uzanmaz, bloğun üstünden aşırtma işler.
+- **Geometrik şut modeli**: şutör kale ağzında gerçek bir noktaya nişan alır,
+  yürütme hatası örneklenir; kaleci GERÇEK konumundan açı kapatma
+  geometrisiyle (kendi düzleminde) kesişmeye uzanmaya çalışır. Gol, kurtarış,
+  aut ve direk bu geometriden kendiliğinden doğar; kafa vuruşu daha yavaş ve
+  dağınıktır; xG aynı geometrinin Gauss-Hermite integralidir
+  (`src/engine/shooting.ts`, `src/engine/xg.ts`).
 - **Doku**: baskı altında pas hatası büyür, pas hızları değişkendir, top
   sürme kararlı ve görünürdür, baskı altındaki taşıyıcıya takım arkadaşları
   pas açısı yaratır, oyuncular enerjilerini idareli kullanır.
 
-## Bilinçli sadeleştirmeler (v1)
+## Bilinçli sadeleştirmeler
 
-- Oyuncu değişikliği yok (kulübeler kozmetik); uzatma/penaltı serisi yok;
-  kendi kalesine gol yok.
-- Taktik ayarları (mentalite/tempo/pres) henüz yok — formasyon seçilebilir.
 - Yorumlar şablon tabanlı Türkçe metinlerdir.
+- Şut uçuşu parametriktir (kale düzleminde geometrik çözüldüğü için);
+  pas/orta/degaj tam balistiktir.
+- Geri pas kuralı yok (kaleci her topu elle alabilir); avantajdan düdüğe
+  geri dönüş yok.
 
 ## Denge notları
 
 Nitelikler (1-20; hız, pas, şut, top sürme, müdahale, pozisyon alma,
 kalecilik, dayanıklılık) motor katsayılarına `src/engine/attributes.ts`
 üzerinden bağlanır; denge ayarı bu dosya + `decisions.ts` puan ağırlıkları +
-`duels.ts`/`shooting.ts` olasılıklarından yapılır. Mevcut ayarla ~30 maçlık
-taramada: maç başına ~2-4 gol, takım başına ~10-20 şut, ~25 faul, ~2 sarı kart;
-güçlü kadro maçların çoğunluğunu kazanır.
+`duels.ts`/`shooting.ts` olasılıklarından yapılır. Mevcut ayar gerçek maç
+istatistiklerine kalibredir (~16-40 maçlık taramalarda): maç başına ~2.5-3
+gol, takım başına ~11-15 şut, ~400-750 pas (%74-82 isabet), ~10-14 faul,
+~1.5 sarı kart, ~2-4 korner, maç başına ~2-4 ofsayt; penaltı dönüşümü ~%76-80; ölü top süreleri
+gerçekçidir (taç ~12 sn, kale vuruşu/korner ~13 sn) ve topun oyunda kalma
+süresi gerçek maç seviyesine iner. Kadro gücü kazandırır ama tek başına
+yetmez: oyuncuların slot görevlerine uyumu (hızlı kanat → içe katan kanat,
+uzun forvet → hedef adam) sonucu ham ortalama kadar etkiler.
+`tests/balance.test.ts` bu bantları regresyon olarak kilitler.

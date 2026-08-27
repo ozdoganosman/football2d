@@ -50,11 +50,28 @@ export interface TeamInfo {
   tactics?: TeamTactics // yoksa dengeli
 }
 
+// Slot görevi (FM tarzı rol): pozisyon alma ofsetlerini ve karar
+// yanlılıklarını eğer. Görevler formasyondan gelir; oyuncu nitelikleriyle
+// birleşince takım kimliği doğar (hedef adamlı 4-4-2 ≠ içe katlı 4-3-3).
+export type SlotJob =
+  | 'fullback' // klasik bek: dengeli
+  | 'wingback' // bindiren bek: toplu oyunda yüksek ve geniş
+  | 'stopper' // stoper: pozisyonunu terk etmez
+  | 'ball_playing' // top oynayan stoper: çıkışta cesur ileri pas
+  | 'anchor' // ön libero: toplu oyunda bile evde kalır, riske girmez
+  | 'box_to_box' // iki kutu arası: toplu oyunda ileri destek
+  | 'playmaker' // oyun kurucu: ara pası/cep pası öncelikli
+  | 'winger' // klasik kanat: çizgiye yapışır, orta arar
+  | 'inside' // içe kat eden kanat: yarı boşluğa girer, şut arar
+  | 'target' // hedef adam: havada hakim, duvar oyunu, kutuda kalır
+  | 'poacher' // ceza sahası bitiricisi: çizgide yaşar, tek dokunuş şut
+
 // Formasyon slotu: depth 0 = kendi kale çizgisi, 1 = rakip kale çizgisi; width -1..1
 export interface FormationSlot {
   depth: number
   width: number
   role: Role
+  job?: SlotJob
 }
 
 export type BallState =
@@ -73,8 +90,19 @@ export type BallState =
       targetId: number | null
       shotQuality?: number
       offside?: boolean // pas anında alıcı ofsayttaydı; varışta düdük çalınır
-      hMax?: number // uçuş tepe yüksekliği (m); 0/undefined = yerden pas
-      curl?: number // yalnız şutlarda: yanal falso genliği (m), iki uçta da sıfır
+      hMax?: number // fırlatma profili bilgisi (kafa gate'i vb.); yükseklik artık bZ'den okunur
+      curl?: number // falso genliği (m): şutta sine ofseti, havadan topta gerçek yanal ivme
+      zTo?: number // şutlarda: kale düzlemindeki kesişme yüksekliği (m) — üstten aut görünür olur
+      // BALİSTİK DURUM (şut dışı uçuşlar): pas/orta/degaj gerçek yerçekimiyle
+      // entegre edilir, iniş sonrası seker ve yuvarlanmaya devreder. Şutlar
+      // parametrik kalır (kale düzleminde geometrik çözülür).
+      bPos?: Vec2 // anlık konum
+      bVel?: Vec2 // yatay hız (m/s)
+      bZ?: number // yükseklik (m)
+      bVz?: number // dikey hız (m/s)
+      curlAx?: Vec2 // falso ekseni (birim, uçuş yönüne dik)
+      curlA?: number // falso ivmesi (m/s²); iniş hedefini bozmayacak şekilde ön-telafili
+      bounces?: number
     }
 
 export type RestartKind =
@@ -101,6 +129,7 @@ export interface PlayerSim {
   info: PlayerInfo
   teamIdx: number // 0 ev sahibi, 1 deplasman
   slotIdx: number
+  job?: SlotJob // formasyon slotunun görevi (karar yanlılıkları için önbellek)
   pos: Vec2
   vel: Vec2 // atalet: ani yön değişimleri yumuşatılır
   energy: number // 0..1 aerobik kondisyon (maç-boyu yavaş erir)
