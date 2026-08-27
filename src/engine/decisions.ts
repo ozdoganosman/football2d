@@ -4,7 +4,7 @@ import {
   PENALTY_AREA_DEPTH,
   PENALTY_AREA_WIDTH,
 } from './constants'
-import { composureFactor, dribbleSkill, shootSkill } from './attributes'
+import { aerialSkill, composureFactor, dribbleSkill, shootSkill } from './attributes'
 import { sharpness } from './stamina'
 import { dist, distToSegment, norm, sub } from './vec'
 import { BALANCED_TACTICS, type PlayerSim, type TeamTactics, type Vec2 } from './types'
@@ -79,6 +79,7 @@ export function decide(
   const att = toAttack(carrier.pos, attackDir)
   const myValue = positionValue(att)
   const options: Decision[] = []
+  const job = carrier.job // slot görevi: karar yanlılıkları
 
   let nearestOppDist = 99
   let nearestOpp: PlayerSim | null = null
@@ -129,7 +130,10 @@ export function decide(
     const progress = positionValue(toAttack(m.pos, attackDir)) - myValue
 
     // Taktik mentalite: hücumcu ileri pası daha çok değerler (0 = dengeli)
-    const progressW = (counter ? 0.6 : 0.48) + tactics.mentality * 0.08
+    // Görev: top oynayan stoper ileri pası sever, ön libero risk sevmez
+    let progressW = (counter ? 0.6 : 0.48) + tactics.mentality * 0.08
+    if (job === 'ball_playing') progressW += 0.05
+    else if (job === 'anchor') progressW -= 0.06
     // Koşu yoluna pas: ileri koşan takım arkadaşı değerli bir hedeftir
     const runSpeed = (m.vel.x * attackDir + Math.abs(m.vel.y) * 0.3) / 7
     const runBonus = Math.max(0, Math.min(0.14, runSpeed * 0.14))
@@ -140,22 +144,27 @@ export function decide(
       runBonus -
       0.21 +
       (passLen > 26 ? -0.02 * (passLen - 26) : 0) +
-      (passLen < 10 ? -0.03 * (10 - passLen) : 0)
+      (passLen < 10 ? (job === 'target' ? -0.015 : -0.03) * (10 - passLen) : 0)
     // Bloklar arası bonus: iki hat arasındaki cepte BOŞTA gösteren adam
-    // değerli bir hedeftir (markajlıysa bonus erir — recvSpace çarpanı)
-    if (mAttX > mfLine + 1.5 && mAttX < offsideLine - 1) score += 0.08 * recvSpace
+    // değerli bir hedeftir (markajlıysa bonus erir — recvSpace çarpanı).
+    // Oyun kurucu cep pasını herkesten iyi görür
+    if (mAttX > mfLine + 1.5 && mAttX < offsideLine - 1) {
+      score += (job === 'playmaker' ? 0.13 : 0.08) * recvSpace
+    }
     // Ara pası: ofsayt çizgisine yapışıp İLERİ fırlayan adam derin topun
     // hedefidir — koşu yoluna pas onu hattın arkasına taşır (yüksek bonus:
     // derin koşuya top atmak modern futbolun ana silahıdır; zamanlama
     // tutmayınca doğal ofsaytlar doğar)
-    if (mAttX > offsideLine - 3 && runSpeed > 0.5) score += 0.11
+    if (mAttX > offsideLine - 3 && runSpeed > 0.5) score += job === 'playmaker' ? 0.17 : 0.11
     // Duvar pası tamamlama: ver-kaç ortağı öne fırladıysa, geri pas onu
     // markajından sıyırıp ileride bulur (yol açıksa değerli)
     if (m.id === returnToId) score += 0.14 * laneOpen
     // Kaleci +1 adamdır: defanstan çıkışta geri pas meşru bir seçenek
     if (m.info.role === 'GK') score -= att.x < -15 ? 0.08 : 0.3
-    // Baskı altındayken güvenli (açık) pas cazipleşir
+    // Baskı altındayken güvenli (açık) pas cazipleşir; ön libero her zaman
+    // emniyetli açıyı önceler (kontra sigortası top kaybetmez)
     score += pressure * laneOpen * 0.12
+    if (job === 'anchor') score += laneOpen * 0.07
     // Defanstan çıkışta genişe oyna: taşıyıcı kendi savunma üçte birindeyken
     // (att.x < -17.5), kendisinden belirgin daha geniş ve geride kalmayan
     // açık bir arkadaş cazipleşir. positionValue merkezi ödüllediği için
@@ -176,8 +185,10 @@ export function decide(
     const inBox =
       att.x > HALF_LENGTH - PENALTY_AREA_DEPTH && Math.abs(att.y) < PENALTY_AREA_WIDTH / 2
     if (inBox || quality > 0.12) {
-      // Taktik mentalite: hücumcu takım şutu biraz daha ister (0 = dengeli)
-      const score = quality * 1.18 + (inBox ? 0.16 : 0) + tactics.mentality * 0.05
+      // Taktik mentalite: hücumcu takım şutu biraz daha ister (0 = dengeli).
+      // Görev: kutu golcüsü ve içe katan kanat şutu koklar
+      const jobShoot = job === 'poacher' ? 0.06 : job === 'inside' ? 0.04 : 0
+      const score = quality * 1.18 + (inBox ? 0.16 : 0) + tactics.mentality * 0.05 + jobShoot
       options.push({ kind: 'shoot', quality, score })
     }
   }
@@ -194,15 +205,21 @@ export function decide(
       for (const o of opponents) {
         if (!o.sentOff) recvMin = Math.min(recvMin, dist(o.pos, m.pos))
       }
-      const s = Math.min(1, recvMin / 6)
+      // Orta hedefi boşluk × hava gücü: hedef adam kutuda mıknatıstır
+      const s =
+        Math.min(1, recvMin / 6) +
+        aerialSkill(m.info.attributes) * 0.3 +
+        (m.job === 'target' ? 0.18 : m.job === 'poacher' ? 0.08 : 0)
       if (s > bestCrossScore) {
         bestCrossScore = s
         bestCross = m
       }
     }
-    if (bestCross && bestCrossScore > 0.4) {
-      // Yalnız kutuda gerçekten boş adam varsa orta cazip olsun
-      const score = 0.3 + bestCrossScore * 0.22 - pressure * 0.12
+    if (bestCross && bestCrossScore > 0.62) {
+      // Yalnız kutuda gerçekten uygun adam varsa orta cazip olsun.
+      // Görev: kanat oyuncusu ortayı sever
+      const jobCross = job === 'winger' ? 0.08 : job === 'wingback' ? 0.04 : 0
+      const score = 0.28 + (bestCrossScore - 0.62) * 0.3 - pressure * 0.12 + jobCross
       options.push({ kind: 'cross', targetId: bestCross.id, score })
     }
   }
@@ -223,8 +240,17 @@ export function decide(
   // meyillidir: puan alan-güdümlü — boş saha gören adam taşır, kalabalıkta
   // pas arar. Kontrada iştah daha da artar. Taban yüksek: gerçek futbolda
   // taşıyıcı topu saniyelerce taşır, pas ancak değerli bir seçenek doğunca çıkar
+  const jobDrb =
+    job === 'inside' || job === 'winger'
+      ? 0.03
+      : job === 'anchor' || job === 'stopper' || job === 'ball_playing'
+        ? -0.07
+        : job === 'poacher'
+          ? -0.04
+          : 0
   const dribbleScore =
     0.56 +
+    jobDrb +
     0.5 * space * dribbleSkill(carrier.info.attributes) +
     (counter ? 0.1 : 0) -
     pressure * 0.42

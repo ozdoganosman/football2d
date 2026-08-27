@@ -49,7 +49,42 @@ export function targetPosition(
   const push = (hasPossession ? 5 : -5) + tactics.mentality * 4
 
   let x = home.x + ballAtt.x * 0.3 + push
-  const y = home.y * widthScale + ballAtt.y * (hasPossession ? 0.3 : 0.4)
+  let y = home.y * widthScale + ballAtt.y * (hasPossession ? 0.3 : 0.4)
+
+  // GÖREV OFSETLERİ (toplu oyunda takım kimliği): bindiren bek yükselir,
+  // içe katan kanat yarı boşluğa girer, ön libero evde kalır, kutu golcüsü
+  // yüksek yaşar. Topsuz herkes bloğa döner (görevler savunmayı bozamaz).
+  if (slot.job && hasPossession) {
+    switch (slot.job) {
+      case 'wingback':
+        x += 4
+        y *= 1.12
+        break
+      case 'winger':
+        y *= 1.18 // çizgiye yapış — genişlik yarat
+        break
+      case 'inside':
+        x += 2.5
+        y *= 0.62 // yarı boşluğa kat — şut açısı ara
+        break
+      case 'box_to_box':
+        x += 3
+        break
+      case 'anchor':
+        x -= 4
+        y *= 0.85 // kontra sigortası: evde kal
+        break
+      case 'poacher':
+        x += 2.5
+        y *= 0.9 // çizgide yaşa
+        break
+      case 'stopper':
+        x -= 1
+        break
+      default:
+        break
+    }
+  }
 
   // Kompaktlık: topsuz takımın hatları topun derinliğine bağlanır.
   // maxDrop: topun gerisine ne kadar çökebilir (hat arası boşluk dar kalsın);
@@ -57,21 +92,24 @@ export function targetPosition(
   // indiğinde orta saha yukarıda çakılı kalmasın, kutu önüne geri koşsun).
   if (!hasPossession) {
     // Forvetler de topsuzken geri döner (4-3-3 savunmada 4-5-1'e yaklaşır);
-    // rakip sahada kamp kurup kontra bekleyemezler
-    const maxDrop = slot.role === 'DF' ? 19 : slot.role === 'MF' ? 14 : 5
-    const maxAhead = slot.role === 'DF' ? 4 : slot.role === 'MF' ? 12 : 15
+    // rakip sahada kamp kurup kontra bekleyemezler. Bindiren bek (3-5-2'de
+    // MF rolündedir) topsuzken BEK disipliniyle savunur — kanadı boş bırakmaz
+    const wb = slot.job === 'wingback'
+    const maxDrop = slot.role === 'DF' || wb ? 19 : slot.role === 'MF' ? 14 : 5
+    const maxAhead = slot.role === 'DF' ? 4 : wb ? 6 : slot.role === 'MF' ? 12 : 15
     // Hat itme tavanı: top rakip sahanın derinindeyken blok topa kadar
     // sürüklenmez — savunma hattı orta sahayı pek geçmez, orta saha sınırlı
     // eşlik eder, yalnız forvetler yüksekte karşılar (full saha pres yok).
     // Taktik pres: yüksek pres tavanı yukarı çeker (daha ileride karşılar).
-    const pressBase = slot.role === 'DF' ? 10 : slot.role === 'MF' ? 24 : 45
+    const pressBase =
+      slot.role === 'DF' ? 10 : wb ? 13 : slot.role === 'MF' ? 24 : 45
     const pressCap = pressBase + tactics.press * 8
     x = Math.max(x, Math.min(ballAtt.x, pressCap) - maxDrop)
     x = Math.min(x, ballAtt.x + maxAhead)
     // Hat, topu izleyerek kale çizgisine kadar İNEMEZ: kutu önünde tutunur.
     // Taktik mentalite/hat: hücumcu daha yüksek hat (ofsayt tuzağı), defansif
     // daha derin tutunma (0 = dengeli, mevcut -HALF_LENGTH+12).
-    if (slot.role === 'DF') x = Math.max(x, -HALF_LENGTH + 12 + tactics.mentality * 5)
+    if (slot.role === 'DF' || wb) x = Math.max(x, -HALF_LENGTH + 12 + tactics.mentality * 5)
   }
 
   return toPitch(

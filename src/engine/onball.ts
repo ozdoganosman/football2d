@@ -534,7 +534,7 @@ export function resolveHeader(sim: MatchSim, winner: PlayerSim, pos: Vec2): void
   if (inShootZone) {
     // Kafa vuruşu kalitesi kafa/boy becerisine bağlı: iyi kafa vuran
     // (uzun santrafor) tehlikeli, kötüsü zararsız
-    const headF = 0.4 + headingSkill(winner.info.attributes) * 0.4
+    const headF = 0.34 + headingSkill(winner.info.attributes) * 0.36
     const q = shotQualityAt(winner, att, sim.active(1 - team)) * headF
     if (q > 0.02) {
       launchShot(sim, winner.id, q, false, true)

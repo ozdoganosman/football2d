@@ -201,6 +201,7 @@ export class MatchSim {
           info: p,
           teamIdx: t,
           slotIdx: i,
+          job: FORMATIONS[info.formation][i].job,
           pos: vec(0, 0),
           vel: vec(0, 0),
           energy: 1,

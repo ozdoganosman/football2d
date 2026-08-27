@@ -92,7 +92,7 @@ export function saveMargin(
   const diveSpeed = 5.4 + 3.6 * g // adım + dalış birleşik etkin hız
   // Erişim DOYAR: uzun uçuş süresi kaleciyi sonsuz genişletmez — insan
   // gövdesinin dalış menzili sınırlıdır (köşeye iyi plase uzaktan da işler)
-  const reachCap = 2.85 + 1.25 * g
+  const reachCap = 2.95 + 1.28 * g
   const reach = Math.min(reachCap, 1.2 + moveT * diveSpeed) * reachFactorForHeight(zAtK)
   return reach - Math.abs(yAtK - keeper.pos.y)
 }

@@ -50,11 +50,28 @@ export interface TeamInfo {
   tactics?: TeamTactics // yoksa dengeli
 }
 
+// Slot görevi (FM tarzı rol): pozisyon alma ofsetlerini ve karar
+// yanlılıklarını eğer. Görevler formasyondan gelir; oyuncu nitelikleriyle
+// birleşince takım kimliği doğar (hedef adamlı 4-4-2 ≠ içe katlı 4-3-3).
+export type SlotJob =
+  | 'fullback' // klasik bek: dengeli
+  | 'wingback' // bindiren bek: toplu oyunda yüksek ve geniş
+  | 'stopper' // stoper: pozisyonunu terk etmez
+  | 'ball_playing' // top oynayan stoper: çıkışta cesur ileri pas
+  | 'anchor' // ön libero: toplu oyunda bile evde kalır, riske girmez
+  | 'box_to_box' // iki kutu arası: toplu oyunda ileri destek
+  | 'playmaker' // oyun kurucu: ara pası/cep pası öncelikli
+  | 'winger' // klasik kanat: çizgiye yapışır, orta arar
+  | 'inside' // içe kat eden kanat: yarı boşluğa girer, şut arar
+  | 'target' // hedef adam: havada hakim, duvar oyunu, kutuda kalır
+  | 'poacher' // ceza sahası bitiricisi: çizgide yaşar, tek dokunuş şut
+
 // Formasyon slotu: depth 0 = kendi kale çizgisi, 1 = rakip kale çizgisi; width -1..1
 export interface FormationSlot {
   depth: number
   width: number
   role: Role
+  job?: SlotJob
 }
 
 export type BallState =
@@ -112,6 +129,7 @@ export interface PlayerSim {
   info: PlayerInfo
   teamIdx: number // 0 ev sahibi, 1 deplasman
   slotIdx: number
+  job?: SlotJob // formasyon slotunun görevi (karar yanlılıkları için önbellek)
   pos: Vec2
   vel: Vec2 // atalet: ani yön değişimleri yumuşatılır
   energy: number // 0..1 aerobik kondisyon (maç-boyu yavaş erir)

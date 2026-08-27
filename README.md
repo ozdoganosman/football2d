@@ -59,6 +59,16 @@ Kritik mekanikler:
 - **Ofsayt**: çizgi sondan ikinci savunmacıdan hesaplanır; hücumcular çizgiye
   saygılı pozisyon alır, sınırdaki paslar bayrağa takılır (taç/santra/kale
   vuruşu muaf).
+- **Görev (rol) sistemi**: her formasyon slotu FM tarzı bir iş taşır —
+  bindiren bek, top oynayan stoper, ön libero, oyun kurucu, klasik/içe katan
+  kanat, hedef adam, kutu golcüsü (`SlotJob`, `formations.ts`). Görevler
+  pozisyon ofsetlerini (toplu oyunda kimlik) ve karar yanlılıklarını eğer;
+  ortalar kutudaki hava topu ustasını arar, duran topları en iyi pasör
+  kullanır. Bindiren bek topsuzken bek disipliniyle savunur (son adam kuralı
+  dahil). Sonuç: kadro-sistem uyumu maç sonucunu ham nitelik ortalaması
+  kadar etkiler ve formasyonlar arasında doğal bir taş-kağıt-makas doğar
+  (3-5-2 kanat disipliniyle 4-3-3'ü frenler, 4-3-3 orta saha üçgeniyle düz
+  4-4-2'ye üstündür, 4-4-2 ile 4-2-3-1 dengelidir).
 - **Görev tabanlı savunma**: topa takım başına tek görevli (first defender),
   bir cover, alıcının markajcısı adamıyla iniş noktasına gider; kalanlar
   adam adama markaj/şekil tutar. Son adam kuralı: hat en derin koşucuyu izler.
@@ -97,5 +107,7 @@ istatistiklerine kalibredir (~16-40 maçlık taramalarda): maç başına ~2.5-3
 gol, takım başına ~11-15 şut, ~400-750 pas (%74-82 isabet), ~10-14 faul,
 ~1.5 sarı kart, ~2-4 korner, maç başına ~2-4 ofsayt; penaltı dönüşümü ~%76-80; ölü top süreleri
 gerçekçidir (taç ~12 sn, kale vuruşu/korner ~13 sn) ve topun oyunda kalma
-süresi gerçek maç seviyesine iner. Güçlü kadro maçların çoğunluğunu kazanır.
+süresi gerçek maç seviyesine iner. Kadro gücü kazandırır ama tek başına
+yetmez: oyuncuların slot görevlerine uyumu (hızlı kanat → içe katan kanat,
+uzun forvet → hedef adam) sonucu ham ortalama kadar etkiler.
 `tests/balance.test.ts` bu bantları regresyon olarak kilitler.

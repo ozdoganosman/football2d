@@ -4,7 +4,7 @@ import {
   PENALTY_AREA_DEPTH,
   PENALTY_AREA_WIDTH,
 } from './constants'
-import { composureFactor, energyFactor, maxSpeed, shootSkill } from './attributes'
+import { aerialSkill, composureFactor, energyFactor, maxSpeed, shootSkill } from './attributes'
 import { shotQualityAt } from './decisions'
 import { targetPosition } from './positioning'
 import { add, clampVec, dist, norm, scale, sub, vec } from './vec'
@@ -60,7 +60,23 @@ export function pickTaker(sim: MatchSim, kind: RestartKind, forTeam: number, spo
     const lt = longThrowTaker(sim, spot, forTeam)
     if (lt >= 0) return lt
   }
-  // taç / korner / serbest vuruş: en yakın saha oyuncusu
+  // Korner / serbest vuruş: DURAN TOP SORUMLUSU — en iyi pasör kullanır
+  // (oyun kurucu/kanat hafif tercihli); restart süresi topa yürümesine yeter
+  if (kind === 'corner' || kind === 'free_kick') {
+    let best: PlayerSim | null = null
+    let bestS = -Infinity
+    for (const m of mates) {
+      if (m.info.role === 'GK') continue
+      const jb = m.job === 'playmaker' || m.job === 'winger' ? 1.5 : 0
+      const sc = m.info.attributes.passing + jb - dist(m.pos, spot) * 0.05
+      if (sc > bestS) {
+        bestS = sc
+        best = m
+      }
+    }
+    if (best) return best.id
+  }
+  // taç: en yakın saha oyuncusu
   let best: PlayerSim | null = null
   for (const m of mates) {
     if (m.info.role === 'GK') continue
@@ -183,12 +199,16 @@ export function crossIntoBox(
     curl = sim.rng.range(-0.8, 0.8)
   }
   landing = clampVec(landing, -HALF_LENGTH + 1, HALF_LENGTH - 1, -HALF_WIDTH + 1, HALF_WIDTH - 1)
+  // Hedef: yakınlık × hava gücü — orta, kutudaki hedef adamı/en iyi kafacıyı arar
   let target: PlayerSim | null = null
-  let bd = 99
+  let bs = -Infinity
   for (const p of attackers) {
-    const dd = dist(p.pos, landing)
-    if (dd < bd) {
-      bd = dd
+    const sc =
+      aerialSkill(p.info.attributes) * 3 +
+      (p.job === 'target' ? 0.7 : p.job === 'poacher' ? 0.3 : 0) -
+      dist(p.pos, landing) * 0.14
+    if (sc > bs) {
+      bs = sc
       target = p
     }
   }

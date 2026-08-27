@@ -706,9 +706,13 @@ export function movePlayers(sim: MatchSim, dt: number): void {
         target = sim.fromAttack(att, p.teamIdx)
       }
 
-      // Son adam kuralı (yalnız bölge tutan DF'ler): hattın arkasında
-      // koşucu bırakılmaz — en derin rakipten önde durulamaz
-      if (p.teamIdx === defTeam && p.info.role === 'DF' && deepestThreat < -5) {
+      // Son adam kuralı (bölge tutan DF'ler + bindiren bekler): hattın
+      // arkasında koşucu bırakılmaz — en derin rakipten önde durulamaz
+      if (
+        p.teamIdx === defTeam &&
+        (p.info.role === 'DF' || p.job === 'wingback') &&
+        deepestThreat < -5
+      ) {
         const attT = sim.toAttack(target, p.teamIdx)
         const floor = Math.max(deepestThreat - 1, -HALF_LENGTH + 5)
         if (attT.x > floor) {
