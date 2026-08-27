@@ -54,6 +54,13 @@ export class Playback {
     this.playhead = tick
   }
 
+  // Belirli bir kareye atla (?t= derin bağlantısı): o ana kadarki olaylar
+  // görünmez işlenir ki skorboard/istatistik/olay akışı atlanan anı doğru
+  // yansıtsın — playhead'i doğrudan yazmak paneli sıfırda bırakıyordu.
+  seek(tick: number): void {
+    this.jumpTo(tick)
+  }
+
   private processEvents(upTo: number, visible: boolean): void {
     const events = this.result.events
     while (this.eventPtr < events.length && events[this.eventPtr].tick <= upTo) {
